@@ -301,10 +301,11 @@ static inline void fcompare(struct CPU *c, double a, double b){
     else if (a < b)            c->fsw |= FSW_C0;
     else                       c->fsw |= FSW_C3;
 }
-/* fcomi / fucomi: write EFLAGS directly */
-#define FCOMI(a,b) do{ double _x=(a),_y=(b); \
-    if(_x!=_x||_y!=_y){ RG_(zf)=1;RG_(pf)=1;RG_(cf)=1; } \
-    else { RG_(pf)=0; RG_(zf)=(_x==_y); RG_(cf)=(_x<_y); } RG_(of)=RG_(sf)=RG_(af)=0; }while(0)
+/* fcomi / fucomi: write EFLAGS directly.  The locals are not _x/_y: X87OPT
+ * keeps the stack slots in an array _x[] and passes _x[k] here. */
+#define FCOMI(a,b) do{ double _fca=(a),_fcb=(b); \
+    if(_fca!=_fca||_fcb!=_fcb){ RG_(zf)=1;RG_(pf)=1;RG_(cf)=1; } \
+    else { RG_(pf)=0; RG_(zf)=(_fca==_fcb); RG_(cf)=(_fca<_fcb); } RG_(of)=RG_(sf)=RG_(af)=0; }while(0)
 
 /* ---- EFLAGS pack/unpack (pushfd/popfd/sahf) --------------------------- */
 static inline uint32_t eflags_get(const struct CPU *c){

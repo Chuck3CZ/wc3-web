@@ -5,6 +5,21 @@ import pefile
 from capstone import *
 from capstone.x86 import *
 
+# Prefixes that change nothing for the lift (WC3 port).  Guest threads run one
+# at a time under the GIL and switch only inside run-time calls, so a lifted
+# instruction is atomic anyway: "lock xadd" is "xadd" (Storm's interlocked
+# helpers, the CRT's locks).  "repz ret"/"rep ret" (AMD branch-predictor
+# padding) and "bnd ret" are "ret".  Normalised in the one place every user of
+# the mnemonic reads it (block discovery, flag liveness, the lift, genall,
+# argcount, flagabi), so they all agree.
+_MN_RAW = CsInsn.mnemonic
+def _mn_norm(self):
+    m = _MN_RAW.fget(self)
+    if m.startswith('lock '): return m[5:]
+    if m in ('repz ret', 'rep ret', 'bnd ret', 'repz ret ', 'rep ret '): return 'ret'
+    return m
+CsInsn.mnemonic = property(_mn_norm)
+
 R32 = {X86_REG_EAX:'eax',X86_REG_ECX:'ecx',X86_REG_EDX:'edx',X86_REG_EBX:'ebx',
        X86_REG_ESP:'esp',X86_REG_EBP:'ebp',X86_REG_ESI:'esi',X86_REG_EDI:'edi'}
 R16 = {X86_REG_AX:'eax',X86_REG_CX:'ecx',X86_REG_DX:'edx',X86_REG_BX:'ebx',
@@ -290,6 +305,12 @@ def flag_liveness(blocks, addrs, in_text):
 
 class Unsupported(Exception): pass
 
+def _mr_acc(size):
+    """guest memory accessor for an operand size; a far pointer (fword, 6) or
+    other size is no plain access: a trap, not a crash of the lift"""
+    try: return {1:'MR8',2:'MR16',4:'MR32',8:'MR64'}[size]
+    except KeyError: raise Unsupported(f"memory operand of {size} bytes")
+
 import os as _os_pc
 _X87PC = _os_pc.environ.get('X87PC', '') == '1'   # see "x87 FPU" in lift_insn
 
@@ -420,7 +441,7 @@ class Lifter:
             if r in SEG: return f"0x{SEG[r]:x}u"   # flat model: constant selector
             raise Unsupported(f"register {r}")
         if op.type==X86_OP_MEM:
-            return {1:'MR8',2:'MR16',4:'MR32',8:'MR64'}[op.size] + self.ea(op.mem)
+            return _mr_acc(op.size) + self.ea(op.mem)
         raise Unsupported("operand type")
 
     def wr(self, op, val):
@@ -434,7 +455,7 @@ class Lifter:
                 return f"(void)({val});   /* flat model: segment write has no effect */"
             raise Unsupported(f"register write {r}")
         if op.type==X86_OP_MEM:
-            return {1:'MR8',2:'MR16',4:'MR32',8:'MR64'}[op.size] + self.ea(op.mem) + f" = ({val});"
+            return _mr_acc(op.size) + self.ea(op.mem) + f" = ({val});"
         raise Unsupported("target operand")
 
     # ---------- jump tables (JTSWITCH=1) ----------
@@ -842,6 +863,25 @@ class Lifter:
         if m=='fldcw':              return [f"c->fcw = MR16{self.ea(o[0].mem)};"]
         if m in ('ffree','ffreep','fnclex','fclex','fnop','fwait','wait','fdecstp','fincstp'):
             return [f"/* {m}: no effect in our model */"] + (["FPOP();"] if m=='ffreep' else [])
+        if m in ('fnstenv','fstenv','fldenv','fnsave','fsave','frstor'):
+            # 32-bit protected-mode layout: FCW @0, FSW @4, FTW @8, the rest (last
+            # instruction/operand pointers) 0.  The lift keeps no tag word: every
+            # register reads as valid (0) and a load ignores it.  fnsave/frstor add
+            # ST(0)..ST(7) as 80-bit reals at 28 + 10*i; fnsave then does fninit.
+            ea = self.ea(o[0].mem)
+            if m in ('fnstenv','fstenv','fnsave','fsave'):
+                L = [f"{{ uint32_t _p={ea}; MR16(_p)=c->fcw; MR16(_p+2u)=0xffffu; MR16(_p+4u)=fsw_get(c); MR16(_p+6u)=0xffffu;"
+                     f" MR32(_p+8u)=0xffff0000u; MR32(_p+12u)=0; MR32(_p+16u)=0; MR32(_p+20u)=0; MR32(_p+24u)=0;"]
+                if m in ('fnsave','fsave'):
+                    L[0] += "".join(f" f80_store(g_mem+_p+{28+10*k}u, ST({k}));" for k in range(8))
+                    L[0] += " memset(c->st,0,sizeof c->st); c->top=0; c->fcw=0x037f; c->fsw=0; }"
+                else:
+                    L[0] += " c->fcw |= 0x003fu; }"      # fnstenv masks every exception
+                return L
+            L = [f"{{ uint32_t _p={ea}; c->fcw=MR16(_p); uint16_t _w=MR16(_p+4u); c->fsw=(uint16_t)(_w & ~0x3800u); c->top=(_w>>11)&7u;"]
+            if m == 'frstor':
+                L[0] += "".join(f" ST({k})=f80_load(g_mem+_p+{28+10*k}u);" for k in range(8))
+            return [L[0] + " }"]
         if m in ('finit','fninit'):
             return ["memset(c->st,0,sizeof c->st); c->top=0; c->fcw=0x037f; c->fsw=0;"]
 
@@ -902,6 +942,11 @@ class Lifter:
             # temporary: source and destination are swapped, then added
             return [f"{{ uint32_t _d={E(0)}, _s={E(1)}, _r=_d+_s;"
                     f" FLAGS_ADD_M(_d,_s,_r,{bits},{self._fm()}); {W(1,'_d')} {W(0,'_r')} }}"]
+        if m == 'cmpxchg8b':
+            # EDX:EAX == m64 ? (ZF=1, m64 = ECX:EBX) : (ZF=0, EDX:EAX = m64); only ZF changes
+            return [f"{{ uint32_t _p={self.ea(o[0].mem)}; uint64_t _v=MR64(_p), _x=((uint64_t)c->edx<<32)|c->eax;"
+                    f" if(_v==_x){{ c->zf=1u; MR64(_p)=((uint64_t)c->ecx<<32)|c->ebx; }}"
+                    f" else {{ c->zf=0u; c->eax=(uint32_t)_v; c->edx=(uint32_t)(_v>>32); }} }}"]
         if m == 'cmpxchg':
             # compare with acc; if equal write the source to the destination, else the destination to acc
             acc = {8:"(uint8_t)c->eax",16:"(uint16_t)c->eax",32:"c->eax"}[bits]
@@ -1193,6 +1238,33 @@ class Lifter:
                         f" for(int _k=0;_k<16;_k++)"
                         f" if(c->xmm[{XM[o[1].reg]}].b[_k] & 0x80u) _r|=1u<<_k;"
                         f" {W(0,'_r')} }}"]
+        def _shuf16(src, imm):
+            return "(" + "|".join(f"((({src})>>{((imm>>(2*k))&3)*16}u)&0xffffull)<<{16*k}u" for k in range(4)) + ")"
+        if m == 'pshufw' and is_mm(0):
+            imm = o[2].imm & 0xff
+            return [f"{{ uint64_t _s={qwords(1,0)}; c->mm[{MM[o[0].reg]}] = {_shuf16('_s', imm)}; }}"]
+        if m in ('pshuflw','pshufhw') and is_xm(0):
+            imm = o[2].imm & 0xff; di = XM[o[0].reg]
+            if m == 'pshuflw':
+                return [f"{{ uint64_t _s={qwords(1,0)}, _h={qwords(1,1)};"
+                        f" c->xmm[{di}].u64[0] = {_shuf16('_s', imm)}; c->xmm[{di}].u64[1] = _h; }}"]
+            return [f"{{ uint64_t _l={qwords(1,0)}, _s={qwords(1,1)};"
+                    f" c->xmm[{di}].u64[0] = _l; c->xmm[{di}].u64[1] = {_shuf16('_s', imm)}; }}"]
+        if m == 'pshufd' and is_xm(0) and is_mem(1):
+            imm = o[2].imm & 0xff; di = XM[o[0].reg]; ea2 = self.ea(o[1].mem)
+            return [f"{{ uint32_t _t[4]; " +
+                    " ".join(f"_t[{k}]=MR32(({ea2})+{4*((imm>>(2*k))&3)}u);" for k in range(4)) +
+                    " " + " ".join(f"c->xmm[{di}].u32[{k}]=_t[{k}];" for k in range(4)) + " }"]
+        if m in ('unpcklpd','unpckhpd','shufpd') and is_xm(0):
+            di = XM[o[0].reg]
+            if m == 'unpcklpd': sel = (0, 0)
+            elif m == 'unpckhpd': sel = (1, 1)
+            else: imm = o[2].imm & 3; sel = (imm & 1, (imm >> 1) & 1)
+            return [f"{{ uint64_t _a=c->xmm[{di}].u64[{sel[0]}], _b={qwords(1, sel[1])};"
+                    f" c->xmm[{di}].u64[0]=_a; c->xmm[{di}].u64[1]=_b; }}"]
+        if m in ('paddq','psubq') and (is_mm(0) or is_xm(0)):
+            op_c = '+' if m == 'paddq' else '-'
+            return [f"{qwords(0,h)} = {qwords(0,h)} {op_c} ({qwords(1,h)});" for h in ([0,1] if is_xm(0) else [0])]
         if m == 'pshufd' and is_xm(0):
             imm = o[2].imm & 0xff
             sel = [(imm>>0)&3,(imm>>2)&3,(imm>>4)&3,(imm>>6)&3]
