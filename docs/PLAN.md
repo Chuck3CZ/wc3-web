@@ -8,12 +8,68 @@
 |---|---|
 | 0 – průzkum | **hotovo** (tento dokument) |
 | 1 – překlad: krok 4 (strom repa) | **hotovo** – `tools/import_nfsu2.sh`, `docs/ORIGIN.md` |
-| 1 – překlad: krok 5 (lift, gen.sh/build.sh) | další |
+| 1 – překlad: krok 5 (lift, gen.sh/build.sh) | **hotovo** – všech 8 modulů přeloženo a zkompilováno do wasm objektů |
+| 2 – spuštění: krok 6 (loader, CRT, Win32, MPQ) | další |
 | 2 – spuštění až po hlavní menu v Chrome | – |
 | 3+ – vstup, skirmish, zvuk, LAN, Docker/QNAP, videa | jen plán (níže) |
 
-**Další krok:** krok 5 – nainstalovat do `~` wasi-sdk 34, Node 20, Rust; `prepare_module.py` + `genall.py` na
-war3.exe, Game.dll, Storm.dll, msvcr80.dll (pak Mss32, ijl15); `gen.sh`/`build.sh` pro WC3 s kontrolou SHA-256.
+**Další krok:** krok 6 – runtime pro WC3: úklid importovaného runtime (seznam „Ještě nezkompilovatelné“ níže),
+N-modulový loader a dispatch, IAT mezi moduly, první link `out/web/wc3.wasm` a běh `war3.exe` pod node:wasi až po
+`LoadLibrary("Game.dll")` / `GameMain`.
+
+### Krok 5 – překlad (2026-10-27)
+
+```sh
+. tools/env.sh                       # PATH/WASI: wasi-sdk 34, Node 20 (v ~, bez sudo)
+./gen.sh "<složka WC3>" [modul ...]  # ověří SHA-256, přeloží do gen/<modul>/ (+ out/mod/<modul>/ logy)
+./build.sh [modul ...]               # zkompiluje shardy do out/web/obj/<modul>/ (cache ~/.cache/wc3-web/obj)
+web/tools/isatest.sh                 # sada x86 testů (i WEB_LIFT=opt)
+```
+
+- Moduly a báze: `gen.sh` (tabulka `MODULES`: soubor, báze, prefix tabulek `g_<prefix>fn_*`, počet shardů, SHA-256).
+- `war3.exe` nemá `.reloc` → `tools/ptrscan.py` sestaví „pseudo-relokace“ (zarovnané dwordy v datech + imm/disp
+  operandy v `.text`, které míří do image); jen přidávají kandidáty na funkce, nikdy nic nemění.
+- Volby lifteru: X87PC, X87OPT, JTSWITCH, LREGS (jako web nfsu2). **Zatím bez** FLAGABI (přidat per modul),
+  FTOL2INL (natvrdo `_ftol2` SPEED2; WC3 má `_ftol2` v msvcr80) a INLINE_LIST (chce profil WC3).
+- Opravy lifteru: prefix `lock` a `repz/rep/bnd ret` normalizované na jednom místě (`CsInsn.mnemonic`; GIL = atomické),
+  nové instrukce `cmpxchg8b`, `pshufw`, `pshuflw`, `pshufhw`, `pshufd` z paměti, `unpcklpd`, `unpckhpd`, `shufpd`,
+  `paddq`, `psubq`, `fnstenv`/`fstenv`/`fldenv`/`fnsave`/`fsave`/`frstor`; neobvyklá velikost operandu (far `jmp
+  fword`) je trap místo pádu lifteru. `cpu.h`: lokální proměnné makra `FCOMI` zakrývaly pole `_x[]` z X87OPT (chyba
+  i v nfsu2, jen se tam neprojevila). `tools/isatest.py` má 15 nových testů; **544 / 580 (WEB_LIFT=opt) kontrol prošlo**.
+- Zbylé trapy jsou skoro všechny data v `.text` dekódovaná jako kód (BCD `daa/das/aaa/aas/aam/aad`, `lds/les`,
+  `lcall/ljmp`, `int`, `int1`, `iretd`, `salc`, far jmp); spustí se jen, pokud se tam kód opravdu dostane (pak je
+  log `[trap]` ukáže).
+
+**Výsledek** (PC: WSL 2, 8 vláken, 23 GB RAM; `-O3`, wasi-sdk 34 / clang 23.1). Všechny shardy všech modulů se
+zkompilovaly, žádný neselhal. `gen.sh` celkem 375 s, `build.sh` 552 s (bez cache).
+
+| modul | báze | funkcí | C (MB) | trapů | lift | objektů | wasm .o (MB) | CPU kompilace |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| war3.exe | 0x00400000 | 2 797 | 8,1 | 14 | 12 s | 21 | 2,8 | 105 s |
+| Storm.dll | 0x00500000 | 1 295 | 8,6 | 3 | 11 s | 20 | 2,6 | 115 s |
+| Mss32.dll | 0x00580000 | 1 258 | 7,4 | 50 | 10 s | 19 | 2,5 | 125 s |
+| ijl15.dll | 0x00600000 | 723 | 9,9 | 12 | 10 s | 11 | 1,7 | 199 s |
+| msvcr80.dll | 0x00680000 | 2 685 | 14,9 | 40 | 15 s | 19 | 4,7 | 208 s |
+| Mp3dec.asi | 0x00740000 | 331 | 2,1 | 16 | 4 s | 8 | 0,6 | 28 s |
+| Mssfast.m3d | 0x00770000 | 407 | 1,3 | 18 | 2 s | 8 | 0,5 | 17 s |
+| **Game.dll** | 0x01000000 | **76 614** | **209,5** | 563 | 311 s | 518 | **77,8** | 3 400 s |
+| **celkem** | | **86 110** | 261,8 | 716 | 375 s | 624 | **93,2** | 4 197 s |
+
+- Opravy lifteru snížily trapy: Storm 13 → 3, ijl15 165 → 12, msvcr80 179 → 40, Game.dll 581 → 563.
+- Objekty mají 93 MB (nfsu2: 35 MB modulu z 23 k funkcí) → čekám modul **~85–95 MB**; zmenšit lze přes FLAGABI
+  (nfsu2: −23 %), `-Oz` studených shardů podle profilu a přenos přes brotli.
+
+**Zjištěno pro krok 6:**
+- **Dispatch tabulka**: `cpu.h` má jednu tabulku `g_dtab` po bajtech přes `.text` SPEED2. Pro WC3 by jedna tabulka
+  přes 0x00401000–0x0186C60A měla ~24,8 M položek (~99 MB RAM). Plán: tabulka po modulech (jen `.text`, ~10,9 M položek,
+  ~43 MB) nebo dvouúrovňová po stránkách; `dispatch_fast` zkontroluje nejdřív Game.dll.
+- **Počty argumentů stdcall importů** (`argcount.py`, pro HLE, které je musí sejmout ze zásobníku): odhad ze
+  call-sites je správně jen u 81,6 % (war3) / 88,5 % (Game) známých funkcí. Pro WC3 je potřeba úplná tabulka počtů
+  argumentů Win32 API (např. z `.spec` souborů Wine) a odhad používat jen jako kontrolu.
+- msvcr80 volí SSE2 cesty (`unpcklpd`…, teď už přeložené) přes `IsProcessorFeaturePresent(10)` / CPUID; runtime může
+  SSE2 hlásit, jen pokud všechny použité instrukce projdou testy.
+- `web/gen.sh` a `web/build.sh` z nfsu2 jsou nahrazené `./gen.sh` a `./build.sh`; při úklidu je smazat nebo předělat
+  na build stránky.
 
 ### Krok 4 – co je v repu (2026-10-27)
 
@@ -266,6 +322,11 @@ prohlížeče), N-modulový loader, SEH, IOCP v síťové vrstvě.
 | 2026-10-27 | kandidátů na funkce Game.dll (horní mez) | ~64 516 |
 | 2026-10-27 | relokací HIGHLOW Game.dll | 401 895 |
 | 2026-10-27 | importovaných systémových API (unikátní) | 637, z toho runtime rozpoznává 212 |
+| 2026-10-27 | přeložených funkcí celkem / Game.dll | 86 110 / 76 614 |
+| 2026-10-27 | vygenerované C celkem | 261,8 MB (Game.dll 209,5 MB) |
+| 2026-10-27 | wasm objekty `-O3` celkem | 93,2 MB (Game.dll 77,8 MB) |
+| 2026-10-27 | čas gen.sh / build.sh (8 vláken, WSL 2) | 375 s / 552 s (4 197 s CPU) |
+| 2026-10-27 | ISA testy (plain / WEB_LIFT=opt) | 544 / 580 kontrol, 0 chyb |
 
 ## Postup průzkumu (reprodukce)
 
