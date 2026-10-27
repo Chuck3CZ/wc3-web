@@ -14,9 +14,9 @@
 **Další krok:** krok 4 – založit strom repozitáře z obecných částí nfsu2-web (viz [Co převzít](#co-převzít-z-nfsu2-web)),
 pak krok 5 – `prepare_module.py` + `genall.py` na Game.dll, Storm.dll, war3.exe.
 
-**Blokuje push:** repozitář `github.com/Chuck3CZ/wc3-web` z tohoto PC zatím nejde použít (GitHub vrací „Repository
-not found“: buď ještě neexistuje, nebo uložené přihlášení nemá přístup k soukromým repozitářům). WSL nemá vlastní
-přihlášení ke gitu. Lokální repo je v `~/wc3-web`.
+**Git:** lokální repo `~/wc3-web`, remote `origin` = `github.com/Chuck3CZ/wc3-web` (soukromé), větev `main`. WSL nemá
+vlastní přihlášení: repo má v lokálním configu `credential.helper` = Windows Git Credential Manager
+(`/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe`). Git ve WSL je 2.25 (`git init -b` neumí).
 
 ## Prostředí
 
