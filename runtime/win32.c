@@ -319,11 +319,31 @@ static void netlog(CPU *c, const ImpEnt *e, uint32_t r, int handled){
  * semantics */
 int win32_caller_module(void){ return 0; }
 
+/* WC3_CRYPTWATCH=1 (debugging): Storm's MPQ crypt table ([0x54c2e4], first
+ * word 0x55c636e2) checked at every import call; the first call that finds it
+ * changed is logged with the guest stack. */
+static void cryptwatch(CPU *c, const ImpEnt *e, uint32_t n_call){
+    static int on = -1, state = 0;
+    if (on < 0){ const char *v = getenv("WC3_CRYPTWATCH"); on = v && *v == '1'; }
+    if (!on || state == 2) return;
+    uint32_t t = MR32(0x54c2e4u);
+    if (!t || !mem_is_committed(t)) return;
+    uint32_t w = MR32(t);
+    if (w == 0x55c636e2u){ if (!state){ state = 1; fprintf(stderr, "[cryptwatch] table at 0x%08x is right (call %u, %s)\n", t, n_call, e->name); } return; }
+    if (state == 1){
+        state = 2;
+        fprintf(stderr, "[cryptwatch] table at 0x%08x CHANGED: [0] = %08x, found at import call %u (%s!%s) from 0x%08x\n",
+                t, w, n_call, e->dll, e->name, MR32(c->esp));
+        guest_backtrace(c, 16);
+    }
+}
+
 int win32_call(CPU *c, uint32_t idx){
     if (idx >= g_nimps) return 0;
     const ImpEnt *e = &g_imps[idx];
     { void win32_thread_term_check(CPU*); win32_thread_term_check(c); }   /* TerminateThread */
     stat_[idx].calls++; g_win32_calls++;
+    cryptwatch(c, e, (uint32_t)g_win32_calls);
     guest_fair_yield();          /* give the other guest threads a turn */
     POP32(c->eip);                      /* take the return address */
     int handled = 1;
@@ -333,10 +353,8 @@ int win32_call(CPU *c, uint32_t idx){
     /* QueryPerformanceCounter is the most frequent call (frame limiter); to
      * skip the name chain's ~20 strcmps the import index is cached on the
      * first match. */
-    static uint32_t qpc_idx = 0xFFFFFFFFu;
     if (0) ;
-    else if (idx == qpc_idx || (qpc_idx == 0xFFFFFFFFu && !strcmp(n,"QueryPerformanceCounter") && (qpc_idx = idx, 1))
-){
+    else if (n[0] == 'Q' && !strcmp(n,"QueryPerformanceCounter")){
         if (ENVC("QPCWHO")) qpc_who(c);
         uint64_t v = host_qpc(); uint32_t p=ARG(c,0);
         if(p){ MR32(p)=(uint32_t)v; MR32(p+4)=(uint32_t)(v>>32); } r=1; }
@@ -477,6 +495,27 @@ int win32_call(CPU *c, uint32_t idx){
     else if (!strcmp(n,"InterlockedIncrement")){ uint32_t p=ARG(c,0); r=++MR32(p); }
     else if (!strcmp(n,"InterlockedDecrement")){ uint32_t p=ARG(c,0); r=--MR32(p); }
     else if (!strcmp(n,"InterlockedExchange")){ uint32_t p=ARG(c,0); r=MR32(p); MR32(p)=ARG(c,1); }
+    /* (dest, exchange, comperand): atomic as every HLE call is (the guest lock) */
+    else if (!strcmp(n,"InterlockedCompareExchange")){ uint32_t p=ARG(c,0); r=MR32(p); if (r == ARG(c,2)) MR32(p)=ARG(c,1); }
+    else if (!strcmp(n,"InterlockedExchangeAdd")){ uint32_t p=ARG(c,0); r=MR32(p); MR32(p)=r+ARG(c,1); }
+    else if (!strcmp(n,"DisableThreadLibraryCalls")) r = 1;
+    else if (!strcmp(n,"GetCommandLineW")){
+        static uint32_t w = 0;
+        if (!w){ const char *a = (const char *)(g_mem + g_cmdline); uint32_t l = (uint32_t)strlen(a);
+            w = gheap_alloc(1, 2*l + 2, 1); for (uint32_t k = 0; k <= l; k++) MR16(w + 2*k) = (uint8_t)a[k]; }
+        r = w; }
+    else if (!strcmp(n,"GetEnvironmentVariableA")){            /* (name, buf, size): the game's environment is empty */
+        win32_set_last_error(c, 203u); r = 0; }               /* ERROR_ENVVAR_NOT_FOUND */
+    else if (!strcmp(n,"GetVolumeInformationA")){
+        /* (root, volname, volnamesize, serial*, maxcomp*, flags*, fsname, fsnamesize): the game folder's drive */
+        uint32_t vn=ARG(c,1), vns=ARG(c,2), ser=ARG(c,3), mc=ARG(c,4), fl=ARG(c,5), fs=ARG(c,6), fss=ARG(c,7);
+        if (vn && vns){ const char *v = "WARCRAFT3"; uint32_t l = (uint32_t)strlen(v); if (l >= vns) l = vns - 1; memcpy(g_mem+vn, v, l); MR8(vn+l) = 0; }
+        if (ser) MR32(ser) = 0x57A3C0DEu;
+        if (mc) MR32(mc) = 255u;
+        if (fl) MR32(fl) = 0x000700FFu;                       /* case preserved, unicode, ... */
+        if (fs && fss){ const char *v = "NTFS"; uint32_t l = 4; if (l >= fss) l = fss - 1; memcpy(g_mem+fs, v, l); MR8(fs+l) = 0; }
+        r = 1; }
+    else if (!strcmp(n,"ImmAssociateContextEx")) r = 1;
     else if (!strcmp(n,"MultiByteToWideChar")){ uint32_t src=ARG(c,2); int sl=(int)ARG(c,3);
         uint32_t dst=ARG(c,4); int dl=(int)ARG(c,5);
         if(sl<0) sl=(int)strlen((char*)(g_mem+src))+1;

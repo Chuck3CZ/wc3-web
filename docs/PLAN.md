@@ -43,7 +43,21 @@ tools/run-node.sh "<složka WC3>" [TRACE_MAX=2000000] [FILELIST=1] [BT=1]   # st
   vytvoří přes 4 000 eventů – statické zámky Stormu).
 - Node 24.21 (`~/.local/node24`): Node 20 neumí wasm exnref (setjmp/longjmp přes nové EH).
 
-**Kde to teď končí:** `GameMain` → kontrola produktů (`sub_01009950`: CD klíč v `War3.mpq`/`War3X.mpq` přes Storm
+**Aktualizace – v Chrome (2026-10-27 večer):** hra projde inicializací až k Direct3D. Postup:
+`node web/build.mjs` (jen host + testovací stránky, bez NFSU2 aplikace), `node web/tools/wc3-dev-server.mjs --data
+"<složka WC3>"` (127.0.0.1:8086, COOP/COEP, `/data-manifest`, `/data/` s Range) a v Chrome
+`http://localhost:8086/test/hostcheck.html?wasm=/wc3.wasm&pages=20480&arg=/data/war3.exe&env=WC3_SAVEDIR=/save&env=WC3_READONLY_DATA=1&fresh`.
+Playwright na Ubuntu 20.04 nejde (nepodporované) – Chrome pouští uživatel ve Windows.
+Opravy, které k tomu vedly: QPC fungoval jen pro první modul (cache indexu importu), chyběly
+`InterlockedCompareExchange`/`ExchangeAdd`, `GetVolumeInformationA`, `GetEnvironmentVariableA`, `GetCommandLineW`,
+`DisableThreadLibraryCalls`, `ImmAssociateContextEx`; a hlavně **`DllMain(..., lpReserved)`**: Windows dává
+statickým DLL nenulové `lpReserved` – Storm při NULL (dynamické načtení) předpočítá šifrovací tabulku se seedem
+0x10000100 místo MPQ 0x100001 a pak nenajde v archivech žádný soubor (ověřeno `WC3_SELFTEST=crypt`, `DUMP=`).
+Teď hra čte z MPQ (CD klíč projde, hlášky jsou česky z `War3xLocal.mpq`) a končí na
+`LoadLibrary("d3d8.dll")` → `Direct3DCreate8` (zatím neimplementováno) → „Warcraft III nedokázal inicializovat
+rozhraní DirectX“. **To je krok 7.** Pozn.: výpis hlášek hry do logu je v CP1250 (rozsypané znaky) – převést na UTF-8.
+
+**Kde to končilo dřív:** `GameMain` → kontrola produktů (`sub_01009950`: CD klíč v `War3.mpq`/`War3X.mpq` přes Storm
 `#289`) → „Warcraft III was unable to initialize.“ Příčina: hra startuje vlákna (CRT a Stormovo asynchronní čtení
 MPQ `0x0051abd0`), node:wasi `thread-spawn` nemá → čtení se nedokončí. Pod Node dál nepůjde (WASI má fd tabulku po
 instancích, vlákna by nečetla soubory otevřené jinde) → další běhy v prohlížeči s webovým hostem nfsu2 (centrální

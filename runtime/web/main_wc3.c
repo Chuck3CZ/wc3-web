@@ -48,8 +48,30 @@ extern void (*g_report_fn)(void);
 
 static CPU cpu; static CPU *const c = &cpu;
 
+/* DUMP=<addr>:<len>[,...] (debugging): guest memory as hex lines at the end
+ * of the run; "*<addr>:<len>" dumps from the pointer stored at addr. */
+static void mem_dumps(void){
+    const char *e = getenv("DUMP");
+    if (!e || !*e) return;
+    char buf[512]; snprintf(buf, sizeof buf, "%s", e);
+    for (char *save = 0, *t = strtok_r(buf, ",", &save); t; t = strtok_r(0, ",", &save)){
+        int ind = *t == '*'; if (ind) t++;
+        uint32_t a = (uint32_t)strtoul(t, 0, 0), n = 0;
+        char *colon = strchr(t, ':'); if (colon) n = (uint32_t)strtoul(colon + 1, 0, 0);
+        if (ind) a = mem_is_committed(a) ? MR32(a) : 0;
+        fprintf(stderr, "[dump] 0x%08x %u bytes\n", a, n);
+        for (uint32_t o = 0; o < n; o += 32){
+            if (!mem_is_committed(a + o)){ fprintf(stderr, "[dump] %08x: not committed\n", a + o); break; }
+            fprintf(stderr, "[dump] %08x:", a + o);
+            for (uint32_t k = 0; k < 32 && o + k < n; k += 4) fprintf(stderr, " %08x", MR32(a + o + k));
+            fprintf(stderr, "\n");
+        }
+    }
+}
+
 static void all_reports(void){
     static int done; if (done) return; done = 1;
+    mem_dumps();
     if (getenv("WATCH_ADDR")) watch_dump("end of run / crash", 24);
     com_report(); win32_report();
     { void gcpu_report(void); gcpu_report(); }
@@ -57,11 +79,37 @@ static void all_reports(void){
     dispatch_report();
 }
 
+/* WC3_SELFTEST=crypt: Storm's MPQ crypt table (Storm.dll 0x517650, seed in
+ * eax, table pointer cached at [0x54c2e4]) built by the lifted code into a
+ * buffer of ours, against the MPQ reference; the run then exits. */
+uint32_t call_guest(CPU *c, uint32_t fn, int nargs, const uint32_t *args);
+static int selftest_crypt(CPU *cp){
+    const uint32_t buf = 0x00C80000u;               /* TEB area, unused this early */
+    mem_commit(buf, 0x2000); memset(g_mem + buf, 0, 0x1400);
+    MR32(0x54c2e4u) = buf;
+    cp->eax = 0x100001u;
+    call_guest(cp, 0x00517650u, 0, 0);
+    uint32_t seed = 0x00100001u, bad = 0, first_bad = 0xFFFFFFFFu;
+    for (uint32_t i1 = 0; i1 < 0x100; i1++)
+        for (uint32_t i2 = i1, k = 0; k < 5; k++, i2 += 0x100){
+            seed = (seed * 125u + 3u) % 0x2AAAABu; uint32_t hi = (seed & 0xFFFFu) << 16;
+            seed = (seed * 125u + 3u) % 0x2AAAABu; uint32_t v = hi | (seed & 0xFFFFu);
+            if (MR32(buf + 4u*i2) != v){ if (!bad++) first_bad = i2; }
+        }
+    fprintf(stderr, "[selftest] crypt table: %u of 1280 words wrong%s", bad, bad ? "" : "\n");
+    if (bad) fprintf(stderr, " (first [0x%x] = %08x, want ...); [0] = %08x (want 55c636e2)\n",
+                     first_bad, MR32(buf + 4u*first_bad), MR32(buf));
+    MR32(0x54c2e4u) = 0;
+    return bad ? 1 : 0;
+}
+
 static void *guest_main_thread(void *unused){
     (void)unused;
     if (setjmp(g_exit_jmp) == 0){
         g_exit_armed = 1;
         guest_lock(&cpu);
+        { const char *st = getenv("WC3_SELFTEST");
+          if (st && !strcmp(st, "crypt")){ g_exit_code = selftest_crypt(&cpu); guest_unlock(); lifecycle_guest_exited(g_exit_code); return 0; } }
         if (module_init_static(&cpu) == 0){
             uint32_t ep = module_exe_entry();
             fprintf(stderr, "\n=== running war3.exe's entry point: 0x%08x ===\n\n", ep);

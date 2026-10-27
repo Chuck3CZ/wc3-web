@@ -257,10 +257,15 @@ static int load_tree(int i, int *order, int *norder, uint32_t *err){
     return 1;
 }
 
-static int attach(CPU *c, int i){
+/* DllMain(hinst, PROCESS_ATTACH, lpReserved): Windows passes a non-NULL
+ * lpReserved for the DLLs loaded with the process (static imports) and NULL
+ * for LoadLibrary, and DLLs tell the two apart: Storm's DllMain prebuilds a
+ * crypt table of another seed (0x10000100) when it is loaded dynamically,
+ * which then stands in for the MPQ table and no file of an archive is found. */
+static int attach(CPU *c, int i, int is_static){
     const ModInfo *mi = g_modtab[i].info;
     if (i == g_exe || g_st[i].attached) return 1;
-    const uint32_t args[3] = { mi->base, DLL_PROCESS_ATTACH, 0 };
+    const uint32_t args[3] = { mi->base, DLL_PROCESS_ATTACH, is_static ? 1u : 0u };
     fprintf(stderr, "[module] %s: DllMain(PROCESS_ATTACH) ...\n", mi->name);
     uint32_t ok = call_guest(c, mi->entry, 3, args);
     fprintf(stderr, "[module] %s: DllMain(PROCESS_ATTACH) -> %u\n", mi->name, ok);
@@ -292,7 +297,7 @@ int module_load_exe(const char *path){
 }
 int module_init_static(CPU *c){
     for (int k = 0; k < g_static_n; k++)
-        if (!attach(c, g_static_order[k])){
+        if (!attach(c, g_static_order[k], 1)){
             fprintf(stderr, "[module] FATAL: %s failed to initialise\n", g_modtab[g_static_order[k]].info->name);
             return -1;
         }
@@ -309,7 +314,7 @@ uint32_t module_load(CPU *c, const char *name, uint32_t *err){
     int order[MODMAX], n = 0;
     if (!load_tree(i, order, &n, err)) return 0;
     for (int k = 0; k < n; k++)
-        if (!attach(c, order[k])){ *err = 1114u; return 0; }  /* ERROR_DLL_INIT_FAILED */
+        if (!attach(c, order[k], 0)){ *err = 1114u; return 0; }  /* ERROR_DLL_INIT_FAILED */
     *err = 0;
     return g_modtab[i].info->base;
 }

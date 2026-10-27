@@ -28,6 +28,10 @@ const opts = {
   loader: { '.txt': 'text', '.png': 'dataurl' },
 };
 for (const [k, v] of Object.entries(opts.entryPoints)) if (!fs.existsSync(v)) delete opts.entryPoints[k];
+// WC3: until the player's page exists (index.html and src/app's shell), only the host, its workers and the test
+// pages are built; nfsu2-web's main.ts and play page import app modules this port left out.
+const HAVE_APP = fs.existsSync('index.html');
+if (!HAVE_APP) for (const k of ['main', 'sw', 'test/play', 'test/aicheck', 'host/predownload-worker']) delete opts.entryPoints[k];
 
 // test pages and source maps go to dist-dev (same relative path: /test/x.js, /main.js.map); the rest to dist
 const devOnly = rel => rel.startsWith('test/') || rel.endsWith('.map');
@@ -46,15 +50,17 @@ fs.mkdirSync(path.join(DEV, 'test'), { recursive: true });
 fs.mkdirSync(DIST, { recursive: true });
 // the start page (its script and stylesheet are main.js / main.css), and its files as they are (src/static: the
 // app's manifest and icons, for installing it on a phone's home screen or as a desktop app)
-fs.copyFileSync('index.html', path.join(DIST, 'index.html'));
-for (const f of fs.readdirSync('src/static')) fs.copyFileSync(path.join('src/static', f), path.join(DIST, f));
+if (HAVE_APP) {
+  fs.copyFileSync('index.html', path.join(DIST, 'index.html'));
+  for (const f of fs.readdirSync('src/static')) fs.copyFileSync(path.join('src/static', f), path.join(DIST, f));
+}
 // the start page's languages (src/app/lang, i18n.ts): /lang/<language>.json, fetched once a player picks one
 fs.rmSync(path.join(DIST, 'lang'), { recursive: true, force: true });
 fs.mkdirSync(path.join(DIST, 'lang'));
-for (const f of fs.readdirSync('src/app/lang')) if (f.endsWith('.json'))
+if (fs.existsSync('src/app/lang')) for (const f of fs.readdirSync('src/app/lang')) if (f.endsWith('.json'))
   fs.writeFileSync(path.join(DIST, 'lang', f), JSON.stringify(JSON.parse(fs.readFileSync(path.join('src/app/lang', f), 'utf8'))));
 const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title><script type=module src="/test/${name}.js"></script>`;
-for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck']) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
+for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck'].filter(n => opts.entryPoints['test/' + n])) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)
 fs.writeFileSync(path.join(DEV, 'test', 'dev.json'), '{"dev":true}\n');
 if (watch) {
