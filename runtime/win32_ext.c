@@ -40,7 +40,7 @@ typedef struct {
 /* v12na: 4096 (was 512).  The game never closes the handle of the thread it
  * starts for every race load, so one slot per load stays in use (measured:
  * +1 per load, heap-07); 512 would have run out after ~500 loads. */
-#define OBJ_MAX 4096
+#define OBJ_MAX 65536   /* WC3: Game.dll's static Storm locks make >4,000 events at load */
 static Obj g_obj[OBJ_MAX];
 static int g_obj_n = 1;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -684,6 +684,41 @@ static void wm_push(uint32_t m, uint32_t wp, uint32_t lp){
     g_wmq[g_wmq_tail].msg = m; g_wmq[g_wmq_tail].wp = wp; g_wmq[g_wmq_tail].lp = lp;
     g_wmq_tail = nx;
 }
+/* SetTimer / KillTimer (WC3: war3.exe and Game.dll run timers on their
+ * window).  A due timer gives one WM_TIMER (wParam id, lParam the callback)
+ * when the queue is otherwise empty, as on Windows; DispatchMessageA calls a
+ * callback timer's TimerProc instead of the window procedure. */
+#define NWTIMER 32
+static struct { uint32_t hwnd, id, ms, proc; uint64_t due; } g_wtimer[NWTIMER];
+uint64_t host_us(void);
+static uint32_t timer_set(uint32_t hwnd, uint32_t id, uint32_t ms, uint32_t proc){
+    static uint32_t next_id = 0x7000u;
+    if (ms < 10u) ms = 10u;                    /* USER_TIMER_MINIMUM */
+    if (!hwnd && !id) id = next_id++;          /* a thread timer gets an id of its own */
+    int k = -1;
+    for (int i = 0; i < NWTIMER; i++) if (g_wtimer[i].ms && g_wtimer[i].hwnd == hwnd && g_wtimer[i].id == id){ k = i; break; }
+    if (k < 0) for (int i = 0; i < NWTIMER; i++) if (!g_wtimer[i].ms){ k = i; break; }
+    if (k < 0){ fprintf(stderr, "[timer] table full (%d)\n", NWTIMER); return 0; }
+    g_wtimer[k].hwnd = hwnd; g_wtimer[k].id = id; g_wtimer[k].ms = ms; g_wtimer[k].proc = proc;
+    g_wtimer[k].due = host_us() + (uint64_t)ms * 1000u;
+    { static int said; if (said++ < 8) fprintf(stderr, "[timer] SetTimer(hwnd 0x%x, id %u, %u ms, proc 0x%08x)\n", hwnd, id, ms, proc); }
+    return id ? id : 1u;
+}
+static int timer_kill(uint32_t hwnd, uint32_t id){
+    for (int i = 0; i < NWTIMER; i++) if (g_wtimer[i].ms && g_wtimer[i].hwnd == hwnd && g_wtimer[i].id == id){ g_wtimer[i].ms = 0; return 1; }
+    return 0;
+}
+/* the first due timer as a WM_TIMER; 0 if none is due */
+static int timer_due(uint32_t *hwnd, uint32_t *id, uint32_t *proc, int remove){
+    uint64_t now = host_us();
+    for (int i = 0; i < NWTIMER; i++)
+        if (g_wtimer[i].ms && now >= g_wtimer[i].due){
+            *hwnd = g_wtimer[i].hwnd; *id = g_wtimer[i].id; *proc = g_wtimer[i].proc;
+            if (remove) g_wtimer[i].due = now + (uint64_t)g_wtimer[i].ms * 1000u;
+            return 1;
+        }
+    return 0;
+}
 /* autotest.c: synthetic WM_KEYDOWN/WM_KEYUP/WM_CHAR */
 void win32_post_message(uint32_t m, uint32_t wp, uint32_t lp){ wm_push(m, wp, lp); }
 /* free entries in the queue (keyboard.c moves host messages in up to that) */
@@ -1304,7 +1339,6 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
             fprintf(stderr,"  [registry] QueryValue(\"%s\")\n", vn);
 
         const char *sval = 0; uint32_t dval = 0; int have_d = 0;
-        const char *language_registry(void);
         /* look at the STORED value first; the language is always the setting's */
         { int ri = strcasecmp(vn, "Language") ? reg_find(vn) : -1;
           if (ri >= 0){
@@ -1326,7 +1360,6 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
          * speed as rdtsc. */
         else if (!strcasecmp(vn,"~MHz")){
             const char *e = getenv("NFSU2_TSC_MHZ"); dval = e && *e ? (uint32_t)strtoul(e,0,0) : 3000u; have_d=1; }
-        else if (!strcasecmp(vn,"Language"))      sval=language_registry();   /* runtime/language.c */
         else if (!strcasecmp(vn,"Install Dir"))   sval="C:\\NFSU2";
         else if (!strcasecmp(vn,"CD Drive"))      sval="C:\\NFSU2";
         else if (!strcasecmp(vn,"StreamingInstall")){ dval=0; have_d=1; }
@@ -1431,7 +1464,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
     else if (!strcmp(n,"SetWindowLongA")||!strcmp(n,"GetWindowLongA")) r=0;
     else if (!strcmp(n,"PeekMessageA")||!strcmp(n,"GetMessageA")){
         /* MSG: +0 hwnd +4 message +8 wParam +12 lParam +16 time +20 pt */
-        uint32_t pm=A(c,0), m=0, wp=0, lp=0;
+        uint32_t pm=A(c,0), m=0, wp=0, lp=0, tw=0, tid=0, tproc=0;
         int remove = !strcmp(n,"GetMessageA") ? 1 : (A(c,4) & 1u);
         /* Host keyboard and mouse messages (keyboard.c), quit requests and
          * app (de)activation (WM_CLOSE / WM_ACTIVATE(APP), lifecycle.c) join
@@ -1464,6 +1497,11 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
                 MR32(pm+16)=0; MR32(pm+20)=0; MR32(pm+24)=0; }
             g_wm_sent++;
             r=1;
+        } else if (timer_due(&tw, &tid, &tproc, remove)){
+            if (pm){ mem_commit(pm,28);
+                MR32(pm)=tw ? tw : g_hwnd; MR32(pm+4)=0x0113u; MR32(pm+8)=tid; MR32(pm+12)=tproc;   /* WM_TIMER */
+                MR32(pm+16)=0; MR32(pm+20)=0; MR32(pm+24)=0; }
+            r=1;
         } else {
             if (pm){ mem_commit(pm,28); memset(g_mem+pm,0,28); MR32(pm)=g_hwnd; }
             r = !strcmp(n,"GetMessageA") ? 1u : 0u;   /* GetMessage 0 = WM_QUIT */
@@ -1471,7 +1509,11 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
     }
     else if (!strcmp(n,"DispatchMessageA")){
         uint32_t pm=A(c,0);
-        if (g_wndproc && pm && mem_is_committed(pm+15)){
+        if (pm && mem_is_committed(pm+15) && MR32(pm+4) == 0x0113u && MR32(pm+12)){
+            /* WM_TIMER of a callback timer: TimerProc(hwnd, WM_TIMER, id, time) */
+            uint32_t args[4] = { MR32(pm), 0x0113u, MR32(pm+8), (uint32_t)(host_us() / 1000u) };
+            g_wm_dispatched++; r = call_guest(c, MR32(pm+12), 4, args);
+        } else if (g_wndproc && pm && mem_is_committed(pm+15)){
             uint32_t args[4] = { MR32(pm), MR32(pm+4), MR32(pm+8), MR32(pm+12) };
             if (args[1]){ g_wm_dispatched++; r = call_guest(c, g_wndproc, 4, args); }
         }
@@ -1479,6 +1521,8 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
     else if (!strcmp(n,"TranslateMessage")
            ||!strcmp(n,"DefWindowProcA")||!strcmp(n,"PostMessageA")
            ||!strcmp(n,"SendMessageA")||!strcmp(n,"PostQuitMessage")) r=0;
+    else if (!strcmp(n,"SetTimer"))  r = timer_set(A(c,0), A(c,1), A(c,2), A(c,3));
+    else if (!strcmp(n,"KillTimer")) r = (uint32_t)timer_kill(A(c,0), A(c,1));
     else if (!strcmp(n,"ReleaseCapture")||!strcmp(n,"SetCapture")) r=1;
     else if (!strcmp(n,"IsIconic")) r=0;
     else if (!strcmp(n,"GetKeyboardState")){ uint32_t p=A(c,0); if(p){mem_commit(p,256);memset(g_mem+p,0,256);} r=1; }

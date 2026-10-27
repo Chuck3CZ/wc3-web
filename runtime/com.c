@@ -856,6 +856,7 @@ static uint32_t tex_child(uint32_t t, uint32_t face, uint32_t level, int cube){
     return sf;
 }
 static uint32_t g_present_no;
+uint32_t win32_present_count(void){ return g_present_no; }   /* heap.c */
 static void com_drop(uint32_t o){
     uint32_t iv = CH_IFACE(o), iface = iv & 0xFFFFu, extra = iv >> 16;
     if (ENVC("NFSU2_COMLOG"))                         /* test-only: lifetime trace */

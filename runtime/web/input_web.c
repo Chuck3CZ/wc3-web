@@ -462,12 +462,9 @@ static void lifecycle_poll(void){
 /* a multiplayer race's trip drives the game by itself (mprace.c): the
  * player's keys, mouse and pad are not passed on meanwhile (releases and
  * focus still are: nothing stays held) */
-int mprace_owns_input(void);
-void sms_request(int id);
-void photo_input(int cmd, int a, int b);                 /* photo.c */
 static int g_muted;
 static void handle(const InEv *e){
-    int mute = mprace_owns_input();
+    int mute = 0;                     /* nfsu2: its multiplayer race took the input */
     if (mute != g_muted){
         g_muted = mute;
         if (mute) release_all("a multiplayer race's trip drives the game", 1);
@@ -503,8 +500,6 @@ static void handle(const InEv *e){
         if (g_quit_events >= 2) force_exit("second quit request");
         break;
     case IEV_LOG: watchdog_log_download(); break;
-    case IEV_SMS: sms_request(e->a); break;
-    case IEV_PHOTO: photo_input(e->dik, e->a, e->b); break;
     default: break;
     }
 }
@@ -1031,7 +1026,6 @@ int gamepad_read(PadState *s){
     if (syn) *s = g_syn;                         /* the script's pad wins while connected */
     pthread_mutex_unlock(&g_pad_mx);
     if (!syn) read_real(s);
-    if (!syn && mprace_owns_input()){ int con = s->connected, wh = s->wheel; memset(s, 0, sizeof *s); s->connected = con; s->wheel = wh; }   /* (handle above) */
     /* a wheel's position is the steering, with no dead zone around the middle (its pedals keep the triggers') */
     if (!s->wheel) stick_dz(&s->axis[PAD_AXIS_LX], &s->axis[PAD_AXIS_LY], dz);
     stick_dz(&s->axis[PAD_AXIS_RX], &s->axis[PAD_AXIS_RY], dz);

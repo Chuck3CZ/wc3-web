@@ -137,7 +137,6 @@ static int background_runs(void){
 }
 double audio_time(void);                                           /* audio.m */
 void discord_lifecycle_changed(void);                              /* discord.c */
-void roam_game_parked(int on);                                     /* roam_game.c: friends see "paused" */
 static void set_active(int on, const char *why){
     if (atomic_exchange(&g_want_active, on ? 1 : 0) != (on ? 1 : 0))
         fprintf(stderr, "app: %s (%s, audio t=%.3f s)\n", on ? "activated" : "deactivated",
@@ -209,7 +208,7 @@ static void parked_pump(void){
     if (p == g_parked_told) return;
     g_parked_told = p;
     discord_lifecycle_changed();                  /* presence: paused while parked */
-    roam_game_parked(p);                          /* free-roam friends: paused while parked */
+    (void)p;
 }
 
 /* Guest thread, from PeekMessageA/GetMessageA once the game window exists:

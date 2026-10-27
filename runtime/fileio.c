@@ -19,6 +19,13 @@ static uint64_t now_ns_io(void){
 
 void mem_commit(uint32_t,uint32_t);
 
+/* The virtual game folder: what GetModuleFileNameA and GetCurrentDirectoryA
+ * say, and a prefix every guest path may carry (WC3 builds its MPQ paths from
+ * the exe's folder). */
+#define GAME_DIR     "Warcraft III"
+#define GAME_DIR_LEN 12
+const char *fileio_game_dir(void){ return "C:\\" GAME_DIR; }
+
 static char g_root[1024] = ".";
 static char g_cwd_rel[512] = "";           /* current directory inside the game */
 uint64_t g_file_open=0, g_file_fail=0, g_file_read=0, g_bytes_read=0;
@@ -33,8 +40,8 @@ void fileio_set_root(const char *exe_path){
 }
 
 /* Turn a Windows path into a real path.
- *   "C:\\NFSU2\\TRACKS\\X.BUN" | "TRACKS\\X.BUN" | ".\\X" -> <root>/TRACKS/X.BUN
- * The virtual game folder is "C:\\NFSU2", so that prefix is dropped.
+ *   "C:\\Warcraft III\\Maps\\X.w3x" | "Maps\\X.w3x" | ".\\X" -> <root>/Maps/X.w3x
+ * The virtual game folder is "C:\\Warcraft III" (GAME_DIR), so that prefix is dropped.
  * Components are resolved case-insensitively.                          */
 /* For opens meant for writing, create the missing parent folders (on Windows
  * the game creates them separately; here the whole path must be ready). */
@@ -72,8 +79,8 @@ static void rel_of(const char *win, char *rel, size_t relsz){
     const char *p = win;
     if (p[0] && p[1]==':') p += 2;                       /* drive letter   */
     while (*p=='\\' || *p=='/') p++;
-    if (!strncasecmp(p,"NFSU2",5) && (p[5]=='\\'||p[5]=='/'||p[5]==0)){
-        p += 5; while (*p=='\\'||*p=='/') p++;           /* virtual root   */
+    if (!strncasecmp(p,GAME_DIR,GAME_DIR_LEN) && (p[GAME_DIR_LEN]=='\\'||p[GAME_DIR_LEN]=='/'||p[GAME_DIR_LEN]==0)){
+        p += GAME_DIR_LEN; while (*p=='\\'||*p=='/') p++;           /* virtual root   */
     }
     while (p[0]=='.' && (p[1]=='\\'||p[1]=='/')) p += 2;
     for (; *p && k<relsz-1; p++) rel[k++] = (*p=='\\') ? '/' : *p;
@@ -632,13 +639,13 @@ int fileio_call(CPU *c, const char *n, uint32_t *out){
          * 0x75FF1E) handed garbage to the profile code, which then
          * enumerated a garbage path (0xFF bytes, then a "*" pattern) and never
          * saved/found profiles.
-         * Current directory is the virtual "C:\NFSU2" (GetCurrentDirectoryA). */
+         * Current directory is the virtual "C:\Warcraft III" (GetCurrentDirectoryA). */
         const char *src = GS(A(c,0)); uint32_t nb = A(c,1), buf = A(c,2), pfp = A(c,3);
         char full[1024];
         int abs_ = (src[0] && src[1] == ':') || src[0] == '\\' || src[0] == '/';
         if (abs_ && src[0] != '\\' && src[0] != '/') snprintf(full, sizeof full, "%s", src);
         else if (abs_) snprintf(full, sizeof full, "C:%s", src);
-        else snprintf(full, sizeof full, "C:\\NFSU2\\%s", src);
+        else snprintf(full, sizeof full, "C:\\" GAME_DIR "\\%s", src);
         for (char *q = full; *q; q++) if (*q == '/') *q = '\\';
         uint32_t len = (uint32_t)strlen(full);
         if (!buf || nb < len + 1) r = len + 1;
@@ -656,7 +663,7 @@ int fileio_call(CPU *c, const char *n, uint32_t *out){
          * We return the virtual root; resolve() maps it to the game folder.
          * If it comes back empty the game cannot find its save/profile folder. */
         uint32_t pp=A(c,4);
-        if (pp){ mem_commit(pp, 260); snprintf((char*)(g_mem+pp), 260, "C:\\NFSU2"); }
+        if (pp){ mem_commit(pp, 260); snprintf((char*)(g_mem+pp), 260, "C:\\" GAME_DIR); }
         r=0; }
     else if (!strcmp(n,"CreateDirectoryA")){
         char real[1024]; resolve_w(GS(A(c,0)), real, sizeof real);

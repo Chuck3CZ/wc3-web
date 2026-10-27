@@ -1,4 +1,4 @@
-/* NFSU2 native port - x86-32 CPU state and guest memory access (macOS ARM64) */
+/* x86-32 CPU state and guest memory access for the lifted code (WC3 port of nfsu2-web's cpu.h) */
 #ifndef NFSU2_CPU_H
 #define NFSU2_CPU_H
 #include <math.h>
@@ -15,7 +15,7 @@
  * g_mem + a is plain integer arithmetic and every MR* is one load/store with
  * the guest displacement in the offset immediate. */
 #define g_mem ((uint8_t *)0)
-#define GUEST_END 0x28000000u
+#define GUEST_END 0x38000000u   /* WC3: heap 0x08000000-0x38000000 (docs/PLAN.md) */
 #define GSZ ((uint64_t)GUEST_END)
 #else
 extern uint8_t *g_mem;
@@ -109,20 +109,30 @@ enum { R_EAX=0,R_ECX,R_EDX,R_EBX,R_ESP,R_EBP,R_ESI,R_EDI };
 struct CPU;
 void dispatch_indirect(struct CPU *c, uint32_t addr);
 void dispatch_tail(struct CPU *c);
-/* The dispatch table (dispatch.c): .text address -> lifted function, or the
+/* The dispatch tables (dispatch.c): code address -> lifted function, or the
  * run-time patch that replaces it; NULL for anything else.  An indirect call
  * or jump in lifted code (DISPATCH_CALL, DISPATCH_TAIL) that finds its target
  * there calls it directly: one load and one call_indirect instead of a call
- * into the dispatcher.  Everything else (COM, Win32, server.dll, generated
- * code, misses, the addresses ICALL/EFXSTAT watch) takes dispatch_indirect /
- * dispatch_tail as before. */
-#define DISPATCH_TEXT_BASE 0x00401000u
-#define DISPATCH_TEXT_SIZE 0x00381af1u
+ * into the dispatcher.  Everything else (COM, Win32, generated code, misses,
+ * the addresses ICALL watches) takes dispatch_indirect / dispatch_tail.
+ *
+ * WC3 (docs/PLAN.md "Rozložení paměti"): every lifted module is mapped at a
+ * fixed base, so two flat tables cover all of their code: the HI table
+ * Game.dll's .text (the hot one, tested first), the LO table war3.exe and
+ * the small DLLs below 0x00800000 (Storm, Mss32, ijl15, msvcr80, the Miles
+ * plugins).  4 bytes an entry: 35 + 16 MB. */
+#define DISPATCH_HI_BASE 0x01001000u
+#define DISPATCH_HI_SIZE 0x0086C000u
+#define DISPATCH_LO_BASE 0x00401000u
+#define DISPATCH_LO_SIZE 0x003FF000u
 typedef void (*guest_fn_t)(struct CPU *);
-extern guest_fn_t g_dtab[DISPATCH_TEXT_SIZE];
+extern guest_fn_t g_dtab_hi[DISPATCH_HI_SIZE];
+extern guest_fn_t g_dtab_lo[DISPATCH_LO_SIZE];
 static inline guest_fn_t dispatch_fast(uint32_t a){
-    uint32_t o = a - DISPATCH_TEXT_BASE;
-    return o < DISPATCH_TEXT_SIZE ? g_dtab[o] : (guest_fn_t)0;
+    uint32_t o = a - DISPATCH_HI_BASE;
+    if (o < DISPATCH_HI_SIZE) return g_dtab_hi[o];
+    o = a - DISPATCH_LO_BASE;
+    return o < DISPATCH_LO_SIZE ? g_dtab_lo[o] : (guest_fn_t)0;
 }
 #define DISPATCH_CALL(c_, t_) do { uint32_t _dc = (uint32_t)(t_); guest_fn_t _df = dispatch_fast(_dc); \
     if (_df) _df(c_); else dispatch_indirect((c_), _dc); } while (0)
@@ -360,8 +370,8 @@ extern int      g_prof_on;          /* 1 if SAMPLE / COVERAGE is on */
 static inline void cov_hit(uint32_t va){
     if (__builtin_expect(g_prof_on, 0)){
         g_last_fn = va;
-        if (g_cov && va >= 0x00401000u && va < 0x00401000u + (3676913u))
-            g_cov[va - 0x00401000u]++;
+        if (g_cov && va - DISPATCH_HI_BASE < DISPATCH_HI_SIZE)
+            g_cov[va - DISPATCH_HI_BASE]++;   /* COVERAGE: Game.dll's .text */
     }
 }
 void cov_report(const char *path);

@@ -9,13 +9,62 @@
 | 0 – průzkum | **hotovo** (tento dokument) |
 | 1 – překlad: krok 4 (strom repa) | **hotovo** – `tools/import_nfsu2.sh`, `docs/ORIGIN.md` |
 | 1 – překlad: krok 5 (lift, gen.sh/build.sh) | **hotovo** – všech 8 modulů přeloženo a zkompilováno do wasm objektů |
-| 2 – spuštění: krok 6 (loader, CRT, Win32, MPQ) | další |
+| 2 – spuštění: krok 6 (loader, CRT, Win32, MPQ) | **rozpracováno** – `wc3.wasm` se linkuje, pod Node proběhnou DllMain všech DLL a start až do `GameMain`; dál chybí vlákna (prohlížeč) |
 | 2 – spuštění až po hlavní menu v Chrome | – |
 | 3+ – vstup, skirmish, zvuk, LAN, Docker/QNAP, videa | jen plán (níže) |
 
-**Další krok:** krok 6 – runtime pro WC3: úklid importovaného runtime (seznam „Ještě nezkompilovatelné“ níže),
-N-modulový loader a dispatch, IAT mezi moduly, první link `out/web/wc3.wasm` a běh `war3.exe` pod node:wasi až po
-`LoadLibrary("Game.dll")` / `GameMain`.
+**Další krok:** krok 6 pokračuje v prohlížeči (vlákna): připravit web host (`web/build.mjs`, testovací stránka
+`web/src/test/hostcheck.ts`, server pro `/data` – `web/tools/dev-server.mjs` nebo Rust server) a spustit `wc3.wasm`
+v Chrome přes Playwright; tam projde Stormovo asynchronní čtení MPQ. Pak USER32 okna/zprávy a registr (níže).
+
+### Krok 6 – stav (2026-10-27)
+
+```sh
+. tools/env.sh
+./gen.sh "<složka WC3>"      # + gen/modtab.c (tabulka modulů pro runtime)
+./build.sh                   # shardy + runtime + link -> out/web/wc3.wasm (80 MB, -O3)
+tools/run-node.sh "<složka WC3>" [TRACE_MAX=2000000] [FILELIST=1] [BT=1]   # start pod Node 24, log out/node-run.log
+```
+
+**Funguje (ověřeno během pod Node 24, jedno vlákno, `WC3_NOTHREAD=1`):**
+- `runtime/module.c` (nový, N modulů): ověří SHA-256, namapuje a zrelokuje 8 modulů, IAT mezi moduly naváže na
+  exporty (jménem i ordinálem – Storm), ostatní na Win32 HLE; DllMain v pořadí závislostí.
+  Výsledek: msvcr80, Storm, Mss32 `DllMain -> 1`; vstupní bod war3.exe běží; `LoadLibrary("Game.dll")` namapuje
+  Game.dll + ijl15 (Game.dll: 668 importů, 310 na přeložené moduly, 358 na HLE), oba `DllMain -> 1`; war3.exe zavolá
+  `GameMain` (Game.dll `sub_01009850`), ten otevře `War3.mpq`, `War3X.mpq`, `War3XLocal.mpq`, `War3Patch.mpq`.
+- `runtime/dispatch.c` (nový): dvě tabulky (`cpu.h` `DISPATCH_HI` = .text Game.dll, `DISPATCH_LO` = war3 + malé DLL),
+  86 110 funkcí, 51 MB RAM.
+- `runtime/web/main_wc3.c`: vstupní bod (příkazová řádka `"C:\Warcraft III\war3.exe" -window`, `WC3_CMDLINE`).
+- `win32.c`: hodiny v reálném čase (místo virtuálních hodin NFSU2 řízených snímky – kvůli lockstepu LAN), kombinovaná
+  tabulka importů + 16 funkcí jen přes GetProcAddress (`Direct3DCreate8`, `DirectSoundCreate`, `AcceptEx`, …),
+  LoadLibrary: systémové DLL → zástupný handle, neznámé DLL (`blizzard.ax`, VORT_DLS, dbghelp…) selžou;
+  virtuální složka hry `C:\Warcraft III` (`fileio.c`); SSE2 vypnuté shodně s CPUID (`IsProcessorFeaturePresent(10)=0`).
+- `win32_ext.c`: `SetTimer`/`KillTimer` + `WM_TIMER`; tabulka objektů jádra 4 096 → 65 536 (DllMain Game.dll
+  vytvoří přes 4 000 eventů – statické zámky Stormu).
+- Node 24.21 (`~/.local/node24`): Node 20 neumí wasm exnref (setjmp/longjmp přes nové EH).
+
+**Kde to teď končí:** `GameMain` → kontrola produktů (`sub_01009950`: CD klíč v `War3.mpq`/`War3X.mpq` přes Storm
+`#289`) → „Warcraft III was unable to initialize.“ Příčina: hra startuje vlákna (CRT a Stormovo asynchronní čtení
+MPQ `0x0051abd0`), node:wasi `thread-spawn` nemá → čtení se nedokončí. Pod Node dál nepůjde (WASI má fd tabulku po
+instancích, vlákna by nečetla soubory otevřené jinde) → další běhy v prohlížeči s webovým hostem nfsu2 (centrální
+I/O worker).
+
+**Dočasné – `runtime/nfsu2_compat/`:** hlavičky NFSU2 (`enhance.h`, `widescreen.h`, `texrep.h`, `dxrec.h`,
+`gamepad.h`, `horn.h`, `carsfx.h`, `racenet.h`) a `stubs.c` s neutrálními náhradami (widescreen, vylepšení grafiky,
+pacer `hfr_*`, DirectInput pad/klávesnice, D3DX, autotest, světlomety). Všechna volání jsou v `com.c`
+(+ `gpu_web.c` pacer, `input_web.c`/`null_platform.c` gamepad, `net_lan.c` racenet) → odstranit při přepisu
+`com.c` na D3D8 (krok 7). Odstraněno už: free roam, SMS, foto, Online lobby, jazykový patch, klaksony, server.dll,
+SPEED2 spin-sleep a virtuální hodiny.
+
+**Zbývá v kroku 6:**
+- USER32: skutečná okna (`RegisterClass`/`CreateWindowEx` → wndproc podle okna), `PostMessage`/`SendMessage`
+  (teď stuby vracející 0), `DefWindowProc` (WM_CREATE, WM_SIZE…), `PostQuitMessage`/WM_QUIT, `GetKeyState`, kurzor,
+  `ClipCursor`, `ClientToScreen`…; dialogy a menu jen stuby.
+- Registr: implementace z nfsu2 ignoruje cesty klíčů (plochá jména, `~/.nfsu2_registry`) → strom klíčů v
+  `/save/registry.txt` (WC3: `HKCU\Software\Blizzard Entertainment\Warcraft III\{Video,Gameplay,Sound,…}`).
+- Počty argumentů stdcall (argcount odhad 82–89 %) → tabulka z Wine `.spec`.
+- IOCP/AcceptEx/WSARecv/WSASend (síť Game.dll), `MapViewOfFile` (Storm, war3) – podle toho, co hra v prohlížeči zavolá.
+- Přejmenovat `NFSU2_*` proměnné a `nfsu2_*` host ABI na `WC3_*` (156 souborů).
 
 ### Krok 5 – překlad (2026-10-27)
 
@@ -268,13 +317,13 @@ relokace → stejné bajty, ověřeno SHA-256). Game.dll na 0x6F000000 leží mi
 | 0x00740000–0x0076A000 | Mp3dec.asi | 0x26F00000 |
 | 0x00770000–0x00786000 | Mssfast.m3d | 0x22600000 |
 | 0x00790000–0x007A1000 | Reverb3.flt (jen bude-li potřeba) | 0x24600000 |
+| 0x00A00000– | (jen hodnoty) handly objektů jádra `win32_ext.c` `H_BASE`, do 65 536 | |
 | 0x00BE0000–0x00C00000 | Winsock hostent buffery (jako nfsu2) | |
-| 0x00C00000–0x01000000 | TEB | |
+| 0x00C00000–0x01000000 | TEB (hlavní 0x00C00000, PEB 0x00C10000, vlákna od 0x00C20000) | |
 | 0x01000000–0x01BB5000 | **Game.dll** (11,7 MB) | 0x6F000000 |
-| 0x02000000–0x03000000 | hlavní zásobník 16 MB | |
-| 0x03000000–0x05000000 | zásobníky vláken | |
-| 0x05000000–0x08000000 | `VirtualAlloc` mimo heap, `MapViewOfFile` | |
-| 0x08000000–0x38000000 | heap VA 768 MB (`GUEST_END = 0x38000000`) | |
+| 0x05000000–0x05FF0000 | hlavní zásobník 16 MB (`main_wc3.c`) | |
+| 0x06000000–0x07000000 | zásobníky vláken 16 × 1 MB (`win32_ext.c`) | |
+| 0x08000000–0x38000000 | heap + `VirtualAlloc` 768 MB (`heap.c`, `GUEST_END = 0x38000000`) | |
 | 0x38000000– | data runtime, C zásobníky, malloc (`--global-base=0x38000000`); initial 1,25 GB, max 4 GB | |
 
 Dispatch: `DISPATCH_TEXT_BASE/SIZE` → tabulka `{lo, hi, fn_addr[], fn_ptr[]}` pro každý modul (war3, Game, Storm,
@@ -327,6 +376,8 @@ prohlížeče), N-modulový loader, SEH, IOCP v síťové vrstvě.
 | 2026-10-27 | wasm objekty `-O3` celkem | 93,2 MB (Game.dll 77,8 MB) |
 | 2026-10-27 | čas gen.sh / build.sh (8 vláken, WSL 2) | 375 s / 552 s (4 197 s CPU) |
 | 2026-10-27 | ISA testy (plain / WEB_LIFT=opt) | 544 / 580 kontrol, 0 chyb |
+| 2026-10-27 | `wc3.wasm` (`-O3`, bez FLAGABI) | 80 MB; runtime 34 objektů; build s cache ~1 min, bez cache ~12 min |
+| 2026-10-27 | start pod Node do `GameMain` | ~43 000 Win32 volání, 4 MPQ otevřené, 2 vlákna požadována |
 
 ## Postup průzkumu (reprodukce)
 

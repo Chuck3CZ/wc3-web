@@ -1,11 +1,11 @@
 #!/bin/bash
-# Compile the lifted modules (gen/<module>, made by ./gen.sh) to wasm objects.
-#   ./build.sh [module ...]          (default: every module gen.sh made)
-# Objects go to out/web/obj/<module>/; a content-addressed cache
-# (~/.cache/wc3-web/obj, keyed by the shard, cpu.h and the flags) makes a
-# rebuild after a partial re-lift cheap.  Linking the runtime and the page
-# comes with step 6 (docs/PLAN.md); until then this is the check that every
-# lifted shard compiles, with the numbers PLAN.md records.
+# Build out/web/wc3.wasm from the lifted modules (gen/<module>, made by
+# ./gen.sh) and the runtime.
+#   ./build.sh                       every module gen.sh made, the runtime, link
+#   ./build.sh <module> ...          only compile those modules' shards (no link)
+# Objects go to out/web/obj/<module>/ and out/web/rt/; a content-addressed
+# cache (~/.cache/wc3-web/obj, keyed by the shard, cpu.h and the flags) makes
+# a rebuild after a partial re-lift cheap.
 #
 # A module is refused when gen/<module>/stamp.txt is missing or incomplete,
 # or names another lifter than this checkout's (the lift and the runtime must
@@ -24,11 +24,11 @@ CFLAGS="$TARGET $OPT $FEAT $DEFS -fno-delete-null-pointer-checks -include runtim
 # the lifted shards: guest memory as an object of its own (cpu.h)
 SHARDFLAGS="-DNFSU2_GUEST_OBJ -Wno-unused-label -Wno-parentheses-equality"
 CACHE="${OBJCACHE:-$HOME/.cache/wc3-web/obj}"; mkdir -p "$CACHE"
-HDRSUM="$( (cat runtime/cpu.h runtime/web/compat/wasm_plat.h; "$CC" --version | head -1; echo "$CFLAGS $SHARDFLAGS") | sha256sum | cut -c1-16)"
+HDRSUM="$( (cat runtime/cpu.h runtime/module.h runtime/web/compat/wasm_plat.h; "$CC" --version | head -1; echo "$CFLAGS $SHARDFLAGS") | sha256sum | cut -c1-16)"
 LIFTER="lifter $(cat tools/lift.py tools/lregs.py tools/genall.py tools/argcount.py tools/prepare_module.py tools/ptrscan.py | sha256sum | cut -c1-16)"
 
-MODS="$*"
-[ -n "$MODS" ] || MODS="$(ls -d gen/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"
+MODS="$*"; LINK=0
+[ -n "$MODS" ] || { MODS="$(ls -d gen/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"; LINK=1; }
 [ -n "$MODS" ] || { echo "build.sh: nothing in gen/ (run ./gen.sh first)"; exit 1; }
 
 # one shard -> one object (run by xargs; prints "<status> <seconds> <bytes> <shard>")
@@ -58,3 +58,59 @@ for MOD in $MODS; do
     "$MOD" $((NB + NC + NF)) "$NB" "$NC" "$NF" "$(awk -v s="$SZ" 'BEGIN{print s/1048576}')" $(( $(date +%s) - T0 )) "$CPU"
 done
 [ "$FAIL" = 0 ] || { echo "build.sh: some shards failed (out/web/obj/<module>/build.log)"; exit 1; }
+[ "$LINK" = 1 ] || exit 0
+
+# ---- runtime ----
+# nfsu2-web's generic runtime (docs/ORIGIN.md) and the WC3 parts; runtime/web/
+# holds the browser stand-ins for the Mac's Cocoa/Metal/CoreAudio parts.
+# runtime/nfsu2_compat/: TEMPORARY, nfsu2-web's interfaces the imported
+# runtime still calls (widescreen, enhancements, frame pacer, DirectInput,
+# D3DX, ...), as headers and neutral stand-ins; docs/PLAN.md lists what is
+# left to take out.
+RT="mem dispatch genexec heap watchdog win32 win32_ext com debug res fileio vsemu oracle lifecycle keyboard winsock module nfsu2_compat/stubs"
+RTFLAGS="$CFLAGS -Iruntime/nfsu2_compat"
+WEB="$(cd runtime/web && ls *.c | sed 's/\.c$//')"
+mkdir -p out/web/rt; rm -f out/web/rt/*.o
+pids=""
+for f in $RT; do
+  o="out/web/rt/$(echo "$f" | tr / _)"
+  $CC $RTFLAGS -c -o "$o.o" "runtime/$f.c" > "$o.log" 2>&1 & pids="$pids $!"
+done
+for f in $WEB; do
+  case "$f" in thread_exit) fl="$TARGET $OPT $FEAT" ;; *) fl="$RTFLAGS" ;; esac
+  $CC $fl -c -o "out/web/rt/web_$f.o" "runtime/web/$f.c" > "out/web/rt/web_$f.log" 2>&1 & pids="$pids $!"
+done
+$CC $CFLAGS -c -o out/web/rt/modtab.o gen/modtab.c > out/web/rt/modtab.log 2>&1 & pids="$pids $!"
+RTFAIL=0; for p in $pids; do wait "$p" || RTFAIL=1; done
+if [ "$RTFAIL" = 1 ]; then
+  for l in out/web/rt/*.log; do grep -q "error:" "$l" && { echo "== ${l%.log}.c"; grep -E "error:" "$l" | head -12; }; done
+  echo "build.sh: the runtime did not compile"; exit 1
+fi
+echo "  runtime  $(ls out/web/rt/*.o | wc -l) objects"
+
+# ---- link ----
+# The guest owns [0, GUEST_END) of linear memory (runtime/cpu.h); the
+# runtime's data starts there.  Initial memory covers the guest span plus room
+# for the runtime heap; it can grow to 4 GB.
+GUEST_END=$((0x38000000))
+INITIAL_MB="${INITIAL_MB:-1280}"
+rm -f out/web/wc3.wasm
+$CC $TARGET $OPT $FEAT -o out/web/wc3.wasm out/web/obj/*/*.o out/web/rt/*.o \
+  -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=4294967296 \
+  -Wl,--initial-memory=$(( INITIAL_MB * 1048576 )),--global-base=$GUEST_END \
+  -Wl,-z,stack-size=$(( 8 * 1048576 )) -Wl,--no-stack-first \
+  -lsetjmp -lwasi-emulated-mman -lwasi-emulated-signal -lwasi-emulated-process-clocks > out/web/link.log 2>&1 || true
+if [ ! -f out/web/wc3.wasm ]; then
+  echo "link FAILED ($(grep -c "undefined symbol" out/web/link.log) undefined symbols):"
+  grep -oE "undefined symbol: [A-Za-z0-9_]+" out/web/link.log | sort | uniq -c | sort -rn | head -60
+  exit 1
+fi
+SIZE=$(stat -c%s out/web/wc3.wasm)
+REV="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)$(git diff --quiet 2>/dev/null || echo +)"
+printf '{"pages":%d,"maxPages":65536,"guestEnd":%d,"rev":"%s","size":%d,"opt":"%s"}\n' \
+  $(( INITIAL_MB * 16 )) "$GUEST_END" "$REV" "$SIZE" "$OPT" > out/web/wc3.json
+echo "link OK: out/web/wc3.wasm ($(( SIZE / 1048576 )) MB, rev $REV)"
+# a C declaration that disagrees with the definition links on wasm but traps
+# when called ("signature_mismatch")
+if grep -q "signature mismatch" out/web/link.log; then
+  echo "WARNING: function signature mismatches (they trap when called):"; grep -A2 "signature mismatch" out/web/link.log | head -40; fi

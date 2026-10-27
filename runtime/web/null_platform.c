@@ -1,6 +1,6 @@
 /* wasm: stand-ins for the Mac-only platform files (metal.m, audio.m,
  * gamepad.m, keyboard_mac.m, discord.c, perflog.c, roam_bsd.c, texrep.m,
- * fpscounter.m).
+ * fpscounter.m); nfsu2-web's free-roam transport stand-ins are gone (WC3).
  *
  * Every function is weak: the real browser implementations (gpu_web.c,
  * audio_web.c, input_web.c, ...) define the same names and replace these at
@@ -11,7 +11,6 @@
 #include "cpu.h"
 #include "gfx.h"
 #include "gamepad.h"
-#include "roam_plat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -249,19 +248,6 @@ WEAK int  texrep_wanted(void){ return 0; }
 WEAK void texrep_set_shown(int on){ (void)on; }
 WEAK int  texrep_shown(void){ return 0; }
 WEAK int  texrep_status(char *buf, size_t n){ (void)buf; (void)n; return 0; }
-
-/* ------------------------------------------------ free-roam transport */
-WEAK int  roam_plat_start(const roam_plat_cfg *cfg, rc_session *s){ (void)cfg; (void)s; fprintf(stderr, "[roam] no transport in this build\n"); return -1; }
-WEAK void roam_plat_stop(uint8_t reason){ (void)reason; }
-WEAK void roam_plat_lock(void){ }
-WEAK void roam_plat_unlock(void){ }
-WEAK int64_t roam_plat_now_us(void){ return (int64_t)(now_s() * 1e6); }
-WEAK uint32_t roam_plat_random(void){ uint32_t r; arc4random_buf(&r, sizeof r); return r; }
-WEAK int  roam_plat_test_mode(void){ return 0; }
-WEAK void roam_plat_get_stats(roam_plat_stats *o){ memset(o, 0, sizeof *o); }
-WEAK int  roam_plat_parse_peers(const char *list, int tm, uint16_t defport, uint32_t *ip, uint16_t *port, int max){
-    (void)list; (void)tm; (void)defport; (void)ip; (void)port; (void)max; return 0; }
-WEAK const char *roam_ip_str(uint32_t ip, char *b){ sprintf(b, "%u.%u.%u.%u", ip >> 24, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255); return b; }
 
 /* ------------------------------------------------------------- dlsym */
 WEAK void *dlsym(void *h, const char *n){ (void)h; (void)n; return NULL; }

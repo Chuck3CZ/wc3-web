@@ -9,13 +9,8 @@
 
 
 /* resolve the nearest function with the function address table */
-extern const uint32_t g_fn_addr[]; extern const uint32_t g_fn_count;
-static uint32_t near_fn(uint32_t a){
-    uint32_t lo=0, hi=g_fn_count, best=0;
-    while(lo<hi){ uint32_t m=(lo+hi)/2;
-        if(g_fn_addr[m]<=a){ best=g_fn_addr[m]; lo=m+1; } else hi=m; }
-    return best;
-}
+#include "module.h"
+static uint32_t near_fn(uint32_t a){ return module_nearest_fn(a, 0); }
 
 void itrace_dump(int n){
     if (!g_itrace_n){ fprintf(stderr,"  (instruction trace empty - not recorded without WATCH=1)\n"); return; }

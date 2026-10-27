@@ -57,8 +57,6 @@
 #include "cpu.h"                 /* g_mem: guest memory is linear memory from 0 */
 #include "host_abi.h"
 #include "audio_proto.h"
-#include "horn.h"
-#include "carsfx.h"
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
@@ -480,8 +478,6 @@ static void mix_into(float *out, unsigned frames){
                 fprintf(stderr, "  [gap] t=%.2f s\n", (double)g_mixed_frames / (double)OUT_RATE); }
         }
     }
-    horn_mix(acc, frames, OUT_RATE);              /* free-roam horns over the game's sound */
-    carsfx_mix(acc, frames, OUT_RATE);            /* ...and friends' nitrous and hydraulics */
     int muted = atomic_load(&g_out_muted);
     for (unsigned k = 0; k < frames * OUT_CH; k++){
         float v = muted ? 0.f : acc[k];
