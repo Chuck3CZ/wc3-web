@@ -23,6 +23,14 @@ You bring your own copy of the game.
 tools/survey/run.sh "/path/to/Warcraft III"     # -> out/survey/ (never committed)
 ```
 
+## Layout
+
+- **`tools/`:** the x86 → C lifter (Python, Capstone) and its analyses; `tools/survey/` the phase 0 survey.
+- **`runtime/`:** Windows, Direct3D, DirectSound and Winsock reimplemented; `runtime/web/` the browser parts.
+- **`web/src/`:** the page's host: game threads as workers on one shared memory, WebGPU, AudioWorklet, the LAN link.
+- **`web/server-rs/`:** the server, in Rust: serves the page, the module and the game folder, and is the virtual LAN.
+- **`web/deploy/`:** Docker Compose, Caddy and Cloudflare Tunnel examples.
+
 ## Origin
 
 The method, the lifter, the Win32/D3D9/sound runtime, the WebGPU and AudioWorklet host and the Rust server come from

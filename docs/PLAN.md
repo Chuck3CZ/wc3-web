@@ -7,12 +7,33 @@
 | Fáze | Stav |
 |---|---|
 | 0 – průzkum | **hotovo** (tento dokument) |
-| 1 – překlad (lifter, gen.sh/build.sh) | čeká na schválení |
+| 1 – překlad: krok 4 (strom repa) | **hotovo** – `tools/import_nfsu2.sh`, `docs/ORIGIN.md` |
+| 1 – překlad: krok 5 (lift, gen.sh/build.sh) | další |
 | 2 – spuštění až po hlavní menu v Chrome | – |
 | 3+ – vstup, skirmish, zvuk, LAN, Docker/QNAP, videa | jen plán (níže) |
 
-**Další krok:** krok 4 – založit strom repozitáře z obecných částí nfsu2-web (viz [Co převzít](#co-převzít-z-nfsu2-web)),
-pak krok 5 – `prepare_module.py` + `genall.py` na Game.dll, Storm.dll, war3.exe.
+**Další krok:** krok 5 – nainstalovat do `~` wasi-sdk 34, Node 20, Rust; `prepare_module.py` + `genall.py` na
+war3.exe, Game.dll, Storm.dll, msvcr80.dll (pak Mss32, ijl15); `gen.sh`/`build.sh` pro WC3 s kontrolou SHA-256.
+
+### Krok 4 – co je v repu (2026-10-27)
+
+`tools/import_nfsu2.sh` zkopíroval z nfsu2-web `606ee35` 277 souborů (4,9 MB, žádné binárky): lifter a jeho analýzy
+(`tools/`), obecný runtime (`runtime/`, `runtime/web/`), web host/GPU/audio/síť (`web/src/`), Rust server bez crates
+`online`, `roam`, `roamload`, `vault`, `names` (`web/server-rs/`), nasazení (`web/deploy/`), testy bez hry. Seznam je
+v tom skriptu; vše ostatní (kariéra, drift, free roam, klaksony, Online, DirectInput, D3DX, macOS/Metal, stránky
+aplikace NFSU2, Discord bot) zůstalo venku.
+
+**Ještě nezkompilovatelné** – úklid při prvním buildu (krok 5/6), s kompilátorem, ne naslepo:
+- odkazy z ponechaných souborů na odstraněný kód (`tools/survey/deadrefs.py ~/nfsu2-web .`, ~100 výskytů):
+  `com.c` 30 (widescreen, dinput, d3dx, headlights, overrides), `web/main_web.c` 15 (registrace NFSU2 modulů),
+  `debug.c` 9, `web/status_web.c` 7, `win32.c` 6, `dispatch.c` 4 (d3dx), `web/input_web.c` 4, `net_proto.h` 4 (roam),
+  `win32_ext.c` 4 (framerate, language), `winsock.c` 4 (Online), `web/gpu_web.c` 3, `perflog.c` 2,
+  `web/audio_web.c` 2 (carsfx, horn), drobnosti v `cpu.h`, `heap.c`, `lifecycle.c`, `web/gcpu.c`;
+- include odstraněných hlaviček: `enhance.h`, `widescreen.h`, `texrep.h`, `dxrec.h` (com.c, vsemu.c, win32.c),
+  `gamepad.h`, `roam_plat.h`, `racenet.h`, `horn.h`, `carsfx.h` (runtime/web);
+- `web/build.sh`/`build.mjs`/`gen.sh` stále sestavují NFSU2 (SPEED2.EXE, server.dll, stránky aplikace) → přepsat pro WC3;
+- `web/server-rs/Cargo.toml` (workspace) stále jmenuje odstraněné crates;
+- 156 souborů obsahuje jména `NFSU2_*`/`SPEED2`/`nfsu2` (proměnné prostředí, logy) → přejmenovat na `WC3_*`.
 
 **Git:** lokální repo `~/wc3-web`, remote `origin` = `github.com/Chuck3CZ/wc3-web` (soukromé), větev `main`. WSL nemá
 vlastní přihlášení: repo má v lokálním configu `credential.helper` = Windows Git Credential Manager
