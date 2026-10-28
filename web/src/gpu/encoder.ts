@@ -714,7 +714,11 @@ export class Encoder {
       const clip = passW === bbW && passH === bbH ? u32[w + D.clip] : 0;
       if (clip !== cClip) {
         const y0 = Math.min(clip & 0xFFFF, passH), y1 = Math.min(clip >>> 16, passH);
-        if (clip) p.setScissorRect(0, y0, passW, Math.max(0, y1 - y0)); else p.setScissorRect(0, 0, passW, passH);
+        if (clip & 0x80000000) {        // a viewport rectangle, 8-pixel units (gpu_proto.h GwDraw.clip)
+          const x0 = Math.min((clip & 255) * 8, passW), ry0 = Math.min(((clip >>> 8) & 255) * 8, passH);
+          const x1 = Math.min(((clip >>> 16) & 255) * 8, passW), ry1 = Math.min(((clip >>> 24) & 127) * 8, passH);
+          p.setScissorRect(x0, ry0, Math.max(0, x1 - x0), Math.max(0, ry1 - ry0));
+        } else if (clip) p.setScissorRect(0, y0, passW, Math.max(0, y1 - y0)); else p.setScissorRect(0, 0, passW, passH);
         cClip = clip;
       }
 

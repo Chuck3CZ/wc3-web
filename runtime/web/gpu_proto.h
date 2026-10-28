@@ -57,7 +57,8 @@ typedef struct {
     uint32_t ix_isz;      /* indexed draw: index size 2 or 4; 0 = not indexed */
     uint32_t ix_ib;       /* indexed draw: pool offset of the first index */
     int32_t  ix_base;     /* indexed draw: BaseVertexIndex */
-    uint32_t clip;        /* the 2D UI on a screen narrower than 4:3: rows y0 | y1 << 16 of the back buffer
+    uint32_t clip;        /* bit 31: a viewport rectangle x0 | y0 << 8 | x1 << 16 | y1 << 24 in 8-pixel units;
+                           * else the 2D UI on a screen narrower than 4:3: rows y0 | y1 << 16 of the back buffer
                            * (its 4:3 band), the draw kept between them; 0 = the whole target (com.c) */
 } GwDraw;
 

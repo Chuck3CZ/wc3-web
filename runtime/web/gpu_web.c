@@ -637,6 +637,16 @@ void metal_set_ui_clip(float sy){
     uint32_t y0 = (uint32_t)lroundf((float)h * (1.f - sy) * 0.5f), y1 = (uint32_t)lroundf((float)h * (1.f + sy) * 0.5f);
     g_cur_clip = y0 | (y1 > h ? h : y1) << 16;
 }
+/* com.c, a draw with a viewport smaller than the target (the unit portrait):
+ * kept inside it, as D3D clips to the viewport.  Bit 31 marks the rectangle
+ * form of GwDraw.clip: x0 | y0 << 8 | x1 << 16 | y1 << 24, 8-pixel units
+ * (rounded outward; up to 2040 x 1016 pixels). */
+void metal_set_vp_clip(int x0, int y0, int x1, int y1){
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
+    unsigned a = (unsigned)x0 >> 3, b = (unsigned)y0 >> 3, c = ((unsigned)x1 + 7u) >> 3, d = ((unsigned)y1 + 7u) >> 3;
+    if (c > 255u) c = 255u; if (d > 127u) d = 127u;
+    g_cur_clip = 0x80000000u | a | b << 8 | c << 16 | d << 24;
+}
 void metal_begin_frame(void){ }
 
 /* ---- records ------------------------------------------------------------- */

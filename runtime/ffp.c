@@ -16,6 +16,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "cpu.h"
 #include "gfx.h"
 
@@ -44,6 +45,24 @@ static Light g_lt[8];
 static int   g_lten[8];
 static struct { float dif[4], amb[4], spe[4], emi[4], pow; } g_mat = { {1,1,1,1}, {0,0,0,0}, {0,0,0,0}, {0,0,0,0}, 0 };
 static float g_vp[6] = { 0, 0, 1280, 720, 0, 1 };
+static float g_rtw = 1280, g_rth = 720;   /* the render target's size (com.c SetRenderTarget) */
+/* the renderer draws to the whole target: D3D's viewport (the unit portrait's
+ * box, ...) is applied here, clip space of the viewport -> of the target */
+void ffp_set_target_size(unsigned w, unsigned h){ if (w && h){ g_rtw = (float)w; g_rth = (float)h; } }
+int ffp_viewport_rect(int *r){
+    if (g_vp[0] == 0.f && g_vp[1] == 0.f && g_vp[2] >= g_rtw && g_vp[3] >= g_rth) return 0;
+    r[0] = (int)g_vp[0]; r[1] = (int)g_vp[1]; r[2] = (int)(g_vp[0] + g_vp[2]); r[3] = (int)(g_vp[1] + g_vp[3]);
+    return 1;
+}
+static void vp_apply(TVert *o){
+    float W = g_rtw, H = g_rth;
+    if (g_vp[0] == 0.f && g_vp[1] == 0.f && g_vp[2] == W && g_vp[3] == H && g_vp[4] == 0.f && g_vp[5] == 1.f) return;
+    float sx = g_vp[2] / W, sy = g_vp[3] / H;
+    float ox = (2.f * g_vp[0] + g_vp[2]) / W - 1.f, oy = 1.f - (2.f * g_vp[1] + g_vp[3]) / H;
+    o->x = o->x * sx + o->w * ox;
+    o->y = o->y * sy + o->w * oy;
+    o->z = o->z * (g_vp[5] - g_vp[4]) + o->w * g_vp[4];
+}
 static int   g_rs_init = 0;
 
 static void rs_defaults(void){
@@ -99,6 +118,11 @@ void ffp_set_light(uint32_t i, uint32_t p){
     for (int k = 0; k < 3; k++){ l->pos[k] = MRF32(p + 52 + 4*k); l->dir[k] = MRF32(p + 64 + 4*k); }
     l->range = MRF32(p + 76); l->falloff = MRF32(p + 80); l->a0 = MRF32(p + 84); l->a1 = MRF32(p + 88); l->a2 = MRF32(p + 92);
     l->theta = MRF32(p + 96); l->phi = MRF32(p + 100);
+    { static int n = 0; const char *e = getenv("WC3_FFLOG");
+      if (e && *e && n++ < 12){
+        fprintf(stderr, "[ff] SetLight(%u): type %08x", i, MR32(p));
+        for (int k = 1; k < 26; k++) fprintf(stderr, " %.3g", (double)MRF32(p + 4u*(uint32_t)k));
+        fprintf(stderr, "\n"); } }
 }
 int ffp_get_light(uint32_t i, uint32_t p){
     if (i >= 8u || !p) return 0;
@@ -239,6 +263,39 @@ static void light(const float *wp, const float *wn, const float *vdif, const flo
 }
 
 static uint64_t g_n_ff, g_n_rhw, g_n_lit;
+/* WC3_FFLOG=N: the state and the first vertex's result of the first N
+ * distinct (FVF, lighting, texture stage ops) combinations */
+static void fflog(uint32_t fvf, uint32_t o, const TVert *v){
+    static int max = -1, n = 0; static uint32_t seen[256][3]; static int ns = 0;
+    if (max < 0){ const char *e = getenv("WC3_FFLOG"); max = e && *e ? atoi(e) : 0; }
+    if (n >= max) return;
+    uint32_t k1 = fvf ^ (g_rs[RS_LIGHTING] << 31) ^ (g_rs[RS_COLORVERTEX] << 30) ^ (g_rs[RS_DIFFUSEMATSRC] << 24);
+    uint32_t k2 = g_tss_raw[0][1] | g_tss_raw[0][2] << 6 | g_tss_raw[0][3] << 12 | g_tss_raw[0][4] << 18 | g_tss_raw[1][1] << 24;
+    uint32_t k3 = g_tss_raw[0][5] | g_tss_raw[0][6] << 8 | g_tss_raw[1][2] << 16 | g_tss_raw[1][3] << 24;
+    for (int i = 0; i < 8; i++) if (g_lten[i]){ uint32_t t; memcpy(&t, &g_lt[i].dif[0], 4); k3 = k3 * 31u + t + g_lt[i].type * 7u; }
+    k3 ^= g_rs[RS_AMBIENT];
+    for (int i = 0; i < ns; i++) if (seen[i][0] == k1 && seen[i][1] == k2 && seen[i][2] == k3) return;
+    if (ns < 256){ seen[ns][0] = k1; seen[ns][1] = k2; seen[ns][2] = k3; ns++; }
+    n++;
+    int nl = 0; for (int i = 0; i < 8; i++) nl += g_lten[i];
+    fprintf(stderr, "[ff] fvf 0x%x lighting %u colorvertex %u difsrc %u ambsrc %u ambient 0x%08x lights %d  mat dif %.2f %.2f %.2f %.2f amb %.2f %.2f %.2f emi %.2f %.2f %.2f\n",
+            fvf, g_rs[RS_LIGHTING], g_rs[RS_COLORVERTEX], g_rs[RS_DIFFUSEMATSRC], g_rs[RS_AMBIENTMATSRC], g_rs[RS_AMBIENT], nl,
+            g_mat.dif[0], g_mat.dif[1], g_mat.dif[2], g_mat.dif[3], g_mat.amb[0], g_mat.amb[1], g_mat.amb[2], g_mat.emi[0], g_mat.emi[1], g_mat.emi[2]);
+    for (int i = 0; i < 8; i++) if (g_lten[i])
+        fprintf(stderr, "[ff]   light %d type %u dif %.2f %.2f %.2f amb %.2f %.2f %.2f dir %.2f %.2f %.2f\n", i, g_lt[i].type,
+                g_lt[i].dif[0], g_lt[i].dif[1], g_lt[i].dif[2], g_lt[i].amb[0], g_lt[i].amb[1], g_lt[i].amb[2], g_lt[i].dir[0], g_lt[i].dir[1], g_lt[i].dir[2]),
+        fprintf(stderr, "[ff]           pos %.1f %.1f %.1f range %.1f att %g %g %g\n", g_lt[i].pos[0], g_lt[i].pos[1], g_lt[i].pos[2], g_lt[i].range, g_lt[i].a0, g_lt[i].a1, g_lt[i].a2);
+    for (int t = 0; t < 3; t++)
+        fprintf(stderr, "[ff]   stage %d colorop %u arg1 0x%x arg2 0x%x  alphaop %u arg1 0x%x arg2 0x%x  texcoord 0x%x ttf 0x%x\n", t,
+                g_tss_raw[t][1], g_tss_raw[t][2], g_tss_raw[t][3], g_tss_raw[t][4], g_tss_raw[t][5], g_tss_raw[t][6], g_tss_raw[t][11], g_tss_raw[t][24]);
+    const Layout *L = layout(fvf);
+    fprintf(stderr, "[ff]   tfactor 0x%08x  normal@%d diffuse@%d  out pos %.2f %.2f %.2f %.2f col %.2f %.2f %.2f %.2f uv %.3f %.3f",
+            g_rs[60], L->off_n, L->off_d, v->x, v->y, v->z, v->w, v->r, v->g, v->b, v->a, v->t[0][0], v->t[0][1]);
+    { float p0[4] = { MRF32(o), MRF32(o + 4), MRF32(o + 8), 1.f }, wp[4]; xform(wp, p0, g_m[0]);
+      fprintf(stderr, "  world %.1f %.1f %.1f", wp[0], wp[1], wp[2]); }
+    if (L->off_n >= 0) fprintf(stderr, "  n %.2f %.2f %.2f", MRF32(o + (uint32_t)L->off_n), MRF32(o + (uint32_t)L->off_n + 4), MRF32(o + (uint32_t)L->off_n + 8));
+    fprintf(stderr, "\n");
+}
 /* one vertex at guest address o; 0 when the FVF is not one this handles */
 int ffp_vertex(uint32_t fvf, uint32_t o, TVert *out){
     const Layout *L = layout(fvf);
@@ -251,14 +308,15 @@ int ffp_vertex(uint32_t fvf, uint32_t o, TVert *out){
     if (L->pos_rhw){
         g_n_rhw++;
         float rhw = MRF32(o + 12), w = (rhw > 1e-20f) ? 1.f / rhw : 1.f;
-        float nx = ((p[0] - g_vp[0]) / (g_vp[2] > 0 ? g_vp[2] : 1.f)) * 2.f - 1.f;
-        float ny = 1.f - ((p[1] - g_vp[1]) / (g_vp[3] > 0 ? g_vp[3] : 1.f)) * 2.f;
+        float nx = (p[0] / g_rtw) * 2.f - 1.f;
+        float ny = 1.f - (p[1] / g_rth) * 2.f;
         out->x = nx * w; out->y = ny * w; out->z = p[2] * w; out->w = w;
         out->r = vd[0]; out->g = vd[1]; out->b = vd[2]; out->a = vd[3];
         out->r1 = vs[0]; out->g1 = vs[1]; out->b1 = vs[2]; out->a1 = vs[3];
     } else {
         float c[4]; xform(c, p, g_wvp);
         out->x = c[0]; out->y = c[1]; out->z = c[2]; out->w = c[3];
+        vp_apply(out);
         if (g_rs[RS_LIGHTING]){
             g_n_lit++;
             float wp[4]; xform(wp, p, g_m[0]);
@@ -294,6 +352,7 @@ int ffp_vertex(uint32_t fvf, uint32_t o, TVert *out){
         } else if (L->sz_t[ci] < 3 || gen) { t[2] = 0.f; t[3] = 1.f; }
         memcpy(out->t[ts], t, sizeof t);
     }
+    fflog(fvf, o, out);
     return 1;
 }
 void ffp_report(void){

@@ -1701,6 +1701,8 @@ static int draw_up(uint32_t pt, uint32_t nv, uint32_t vp, uint32_t stride){
     vsk = aspect_apply(vsk, prog);
 #ifdef __wasm__
     { void metal_set_ui_clip(float); metal_set_ui_clip(g_ui_clip); }
+    if (!prog && g_cur_fvf){ int ffp_viewport_rect(int *); void metal_set_vp_clip(int, int, int, int);
+        int vr[4]; if (ffp_viewport_rect(vr)) metal_set_vp_clip(vr[0], vr[1], vr[2], vr[3]); }
 #endif
 
     /* Declaration parsing ONCE per (declaration, shader).
@@ -3466,6 +3468,9 @@ int com_call(CPU *c, uint32_t magic){
                 uint32_t face = (surf && mem_is_committed(surf+47)) ? MR32(surf+44) : 0u;
                 g_cur_rt = tid;
                 metal_set_render_target(tid | ((face & 7u) << 16));
+                { void ffp_set_target_size(unsigned, unsigned); void metal_tex_size(unsigned, unsigned *, unsigned *);
+                  unsigned tw = g_bb_w, th = g_bb_h; if (tid) metal_tex_size(tid, &tw, &th);
+                  ffp_set_target_size(tw, th); }
                 if (tid) g_rt_set++; else g_rt_screen++;
             }
             r=0; }
@@ -4022,6 +4027,16 @@ int com_call(CPU *c, uint32_t magic){
             uint32_t buf = self ? (is_cube2 ? MR32(self + 104u + 4u*(face2 & 7u))
                                             : MR32(self + 32u + 4u*level)) : 0;
             gheap_check_block(c, buf, "LOCK BUFFER OVERRUN (UnlockRect)");   /* NFSU2_HEAPCHECK only */
+            if (iface==IF_SURF && self && MR32(self+56) && (CH_FLAGS(self) & CF_CHILD)){
+                /* a texture level's surface: w x h is that level's size; the
+                 * upload takes the texture's size and the level */
+                uint32_t par = CH_PARENT(self), sl = MR32(self+56) - 1u;
+                if (par && com_valid(par) && metal_available() && mid && buf){
+                    uint32_t pw = MR32(par+4), ph = MR32(par+8);
+                    metal_upload_texture(mid, sl, g_mem+buf, metal_level_pitch(pw,sl,fmt), pw, ph, fmt);
+                }
+                w = 0;                                      /* uploaded: not again below */
+            }
             if (metal_available() && mid && buf && w && h)
                 metal_upload_texture(mid, level, g_mem+buf,
                                      metal_level_pitch(w,level,fmt), w, h, fmt);
@@ -4065,8 +4080,14 @@ int com_call(CPU *c, uint32_t magic){
             MR32(sf+40)=2;
             uint32_t self=A(c,0);
             if (self && mem_is_committed(self+31)){
-                MR32(sf+4)=MR32(self+4); MR32(sf+8)=MR32(self+8);
+                /* the level's own size, and the level (+1) for UnlockRect: WC3
+                 * fills its textures' mip levels through these surfaces, and all
+                 * of them went to level 0 (the smallest last: black models,
+                 * trees gone) */
+                uint32_t lw = MR32(self+4) >> lvl3, lh = MR32(self+8) >> lvl3;
+                MR32(sf+4) = lw ? lw : 1u; MR32(sf+8) = lh ? lh : 1u;
                 MR32(sf+20)=MR32(self+20); MR32(sf+28)=MR32(self+28);
+                MR32(sf+56) = lvl3 + 1u;
             }
             if(pp) MR32(pp)=sf; r=0;
           surf_done:; }
@@ -4082,6 +4103,8 @@ int com_call(CPU *c, uint32_t magic){
             if(p){ mem_commit(p,32); memset(g_mem+p,0,32);
                 uint32_t fw = self?MR32(self+4):256, fh = self?MR32(self+8):256;
                 uint32_t ff = self?MR32(self+20):0;
+                if (MID(GetLevelDesc) && iface==IF_TEX && nargs >= 3){
+                    uint32_t lv = A(c,1); if (lv < 16u){ fw >>= lv; fh >>= lv; if (!fw) fw = 1; if (!fh) fh = 1; } }
                 if (!fw) fw = 640; if (!fh) fh = 480;
                 if (!ff) ff = 22;                    /* D3DFMT_X8R8G8B8 */
                 MR32(p)    = ff;                     /* Format          */
