@@ -399,7 +399,7 @@ static void check_saved(CPU *c, const uint32_t *before, const char *nm){
 static uint32_t g_hot8[32][128], g_hot8_seen[32][128];
 void d3d8_hot_report(void){
     int any = 0;
-    for (int k = 0; k < 16; k++){
+    for (int k = 0; k < 48; k++){
         uint32_t best = 0; int bi = -1, bm = -1;
         for (int i = 0; i < 32; i++) for (int m = 0; m < 128; m++){
             uint32_t d = g_hot8[i][m] - g_hot8_seen[i][m];

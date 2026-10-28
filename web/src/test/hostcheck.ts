@@ -3,6 +3,7 @@
 import { startProcess } from '../host/process';
 import { attachNet } from '../net/index';
 import { attachRenderer } from '../gpu/index';
+import { attachInput } from '../input/index';
 const q = new URLSearchParams(location.search);
 const gpu = q.has('gpu');
 const canvas = document.createElement('canvas');
@@ -55,6 +56,12 @@ if (gpu) {
   try {
     const r = await attachRenderer(p, canvas, { log });
     log('[page] WebGPU renderer attached');
+    // mouse and keyboard over the picture (imageRect is in canvas pixels; the input wants CSS px)
+    const inp = attachInput(p, canvas, { log, hideCursor: false, viewRect: () => {
+      const ir = r.imageRect(), k = canvas.clientWidth / (canvas.width || 1);
+      return { x: ir.x * k, y: ir.y * k, w: ir.w * k, h: ir.h * k }; } });
+    (globalThis as any).wc3Input = inp;
+    canvas.tabIndex = 0; canvas.focus();
     const every = +(q.get('shot') ?? 0);
     if (every > 0) setInterval(async () => {
       try { const png = await r.dump('shot'); await fetch('/shot', { method: 'POST', body: png }); }

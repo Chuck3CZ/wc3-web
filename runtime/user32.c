@@ -268,6 +268,14 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
             send_msg(c, h, WM_MOVE, 0, (uint32_t)(x & 0xFFFF) | ((uint32_t)y << 16));
             g_paint_pending[slot] = 1;
         }
+        /* WC3's video player (BlizPlay) plays through DirectShow, which is not
+         * there: its first WM_TIMER called a NULL filter graph.  Closed at
+         * once, as Escape would, it ends the movie and the game goes on;
+         * WC3_MOVIES=1 leaves it open. */
+        if (!strcmp(g_cls[k].name, "BlizPlay") && !getenv("WC3_MOVIES")){
+            fprintf(stderr, "[user32] video player window: closed at once (no DirectShow; a skipped movie)\n");
+            q_post(h, WM_CLOSE, 0, 0);
+        }
         r = h;
     }
     else if (IS("ShowWindow")){

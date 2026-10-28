@@ -3996,7 +3996,20 @@ int com_call(CPU *c, uint32_t magic){
                 int metal_read_texture(unsigned, void *, unsigned, unsigned);
                 metal_read_texture(MR32(self+28), g_mem+buf, pitch, rows);
             }
-            if(plr){ mem_commit(plr,8); MR32(plr)=pitch; MR32(plr+4)=buf; }
+            /* pRect: pBits points at that rectangle's first texel (WC3 writes
+             * its font's glyphs into the glyph texture rectangle by rectangle;
+             * every glyph landed in the top left corner) */
+            uint32_t prc = is_cube ? A(c,4) : ((iface==IF_TEX) ? A(c,3) : A(c,2)), at = buf;
+            if (prc && mem_is_committed(prc+15)){
+                uint32_t lft = MR32(prc), top = MR32(prc+4);
+                unsigned bpb = 0, blk = 1;
+                { uint32_t lw = w >> level; if (!lw) lw = 1;
+                  uint32_t p1 = metal_available() ? metal_level_pitch(w,level,fmt) : lw*4u;
+                  blk = (fmt==0x31545844u||fmt==0x33545844u||fmt==0x35545844u) ? 4u : 1u;
+                  bpb = blk == 1u ? p1 / lw : (fmt==0x31545844u ? 8u : 16u); }
+                if (top/blk < rows && bpb) at = buf + (top/blk)*pitch + (lft/blk)*bpb;
+            }
+            if(plr){ mem_commit(plr,8); MR32(plr)=pitch; MR32(plr+4)=at; }
             r=0; }
         else if (MID(UnlockRect)){
             /* 2D: (Level)  |  CUBE: (FaceType, Level)  |  Surface: () */
