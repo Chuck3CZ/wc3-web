@@ -10,6 +10,7 @@
 //   /data/<path>                         the game folder's files, with Range
 //   POST /log                            the test page's log -> out/browser.log
 //   POST /shot                           the test page's screenshot -> out/shot.png
+//   WS   /lan                            a minimal virtual LAN switch (web/server-rs crates/lan's protocol, no limits)
 // with the headers that make the page cross-origin isolated (SharedArrayBuffer).
 // Port 8086: 8080 is the QNAP's admin page (docs/PLAN.md).
 import http from 'node:http';
@@ -70,7 +71,58 @@ function sendFile(req, res, full, type) {
   }
 }
 
-http.createServer((req, res) => {
+// ---- the virtual LAN switch (minimal; the real one is web/server-rs crates/lan) ----
+// Every page gets 10.77.0.N; binary frames: [0] kind, [4..7] source vip (rewritten to the
+// sender's), [8..11] destination vip (0xFFFFFFFF: everyone else); kind 32 is a bundle of frames.
+import { WebSocketServer } from 'ws';
+import crypto from 'node:crypto';
+const lan = new WebSocketServer({ noServer: true });
+const peers = new Map();            // vip -> { ws, name }
+let nextHost = 2;
+const ipStr = v => [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.');
+const peerList = () => [...peers].map(([vip, p]) => ({ vip, name: p.name }));
+const tellPeers = () => { const m = JSON.stringify({ t: 'peers', peers: peerList() });
+  for (const p of peers.values()) if (p.ws.readyState === 1) p.ws.send(m); };
+function route(from, frame) {
+  if (frame.length < 12) return;
+  frame.writeUInt32BE(from, 4);
+  const dst = frame.readUInt32BE(8);
+  if (dst === 0xFFFFFFFF) { for (const [v, p] of peers) if (v !== from && p.ws.readyState === 1) p.ws.send(frame); }
+  else { const p = peers.get(dst); if (p && p.ws.readyState === 1) p.ws.send(frame); }
+}
+lan.on('connection', ws => {
+  let vip = 0;
+  ws.on('message', (data, isBinary) => {
+    if (!isBinary) {
+      let m; try { m = JSON.parse(String(data)); } catch { return; }
+      if (m.t === 'hello' && !vip) {
+        const old = typeof m.vip === 'string' ? m.vip.split('.').reduce((a, b) => (a * 256 + (+b)) >>> 0, 0) : 0;
+        vip = old && !peers.has(old) ? old : ((10 << 24) | (77 << 16) | (nextHost++ & 255)) >>> 0;
+        peers.set(vip, { ws, name: String(m.name ?? 'player').slice(0, 32) });
+        ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: ipStr(vip), mask: '255.255.255.0', token: crypto.randomBytes(16).toString('hex') }));
+        console.log(`[lan] ${ipStr(vip)} "${peers.get(vip).name}" joined (${peers.size} on the LAN)`);
+        tellPeers();
+      } else if (m.t === 'ping') ws.send(JSON.stringify({ t: 'pong', id: m.id }));
+      return;
+    }
+    if (!vip) return;
+    const b = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    if (b[0] === 32) {                                   // a bundle: [0] n, [2..3] length, n x destination, frame
+      let o = 4;
+      while (o + 4 <= b.length) {
+        const n = b[o], len = b.readUInt16BE(o + 2); o += 4;
+        const dsts = []; for (let i = 0; i < n; i++) { dsts.push(b.readUInt32BE(o)); o += 4; }
+        if (o + len > b.length) break;
+        const f = Buffer.from(b.subarray(o, o + len)); o += len;
+        if (!n) route(vip, f);
+        else for (const d of dsts) { const g = Buffer.from(f); g.writeUInt32BE(d, 8); route(vip, g); }
+      }
+    } else if (b[0] !== 33) route(vip, Buffer.from(b));
+  });
+  ws.on('close', () => { if (vip && peers.get(vip)?.ws === ws) { peers.delete(vip); console.log(`[lan] ${ipStr(vip)} left`); tellPeers(); } });
+});
+
+const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = decodeURIComponent(url.pathname);
   // the test page's log (hostcheck.ts ?logpost): out/browser.log, started over by a new run
@@ -104,4 +156,9 @@ http.createServer((req, res) => {
     if (f && fs.existsSync(f) && fs.statSync(f).isFile()) return sendFile(req, res, f);
   }
   res.writeHead(404, ISOLATION).end('not found');
-}).listen(PORT, HOST, () => console.log(`[dev-server] http://${HOST}:${PORT}/`));
+});
+server.on('upgrade', (req, sock, head) => {
+  if (new URL(req.url, 'http://x').pathname !== '/lan') return sock.destroy();
+  lan.handleUpgrade(req, sock, head, ws => lan.emit('connection', ws, req));
+});
+server.listen(PORT, HOST, () => console.log(`[dev-server] http://${HOST}:${PORT}/`));
