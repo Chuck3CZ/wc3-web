@@ -161,6 +161,10 @@ void ffp_set_viewport(uint32_t p){
     if (!p || !mem_is_committed(p + 23)) return;
     g_vp[0] = (float)MR32(p); g_vp[1] = (float)MR32(p + 4); g_vp[2] = (float)MR32(p + 8); g_vp[3] = (float)MR32(p + 12);
     g_vp[4] = MRF32(p + 16); g_vp[5] = MRF32(p + 20);
+    { static float seen[32][4]; static int ns = 0; int f = 0;
+      for (int i = 0; i < ns; i++) if (!memcmp(seen[i], g_vp, sizeof seen[i])) f = 1;
+      if (!f && ns < 32){ memcpy(seen[ns++], g_vp, sizeof seen[0]);
+        fprintf(stderr, "[ff] viewport %g,%g %gx%g z %g..%g (target %gx%g)\n", g_vp[0], g_vp[1], g_vp[2], g_vp[3], g_vp[4], g_vp[5], g_rtw, g_rth); } }
 }
 
 /* ---- per vertex ---- */

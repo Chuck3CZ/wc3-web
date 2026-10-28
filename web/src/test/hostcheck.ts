@@ -4,11 +4,15 @@ import { startProcess } from '../host/process';
 import { attachNet } from '../net/index';
 import { attachRenderer } from '../gpu/index';
 import { attachInput } from '../input/index';
+import { attachAudio } from '../audio/index';
 const q = new URLSearchParams(location.search);
 const gpu = q.has('gpu');
 const canvas = document.createElement('canvas');
 if (gpu) { canvas.width = 1280; canvas.height = 720; canvas.style.cssText = 'display:block;width:1280px;max-width:100%;background:#000';
-           document.body.append(canvas); }
+           document.body.append(canvas);
+           const fs = document.createElement('button'); fs.textContent = 'Celá obrazovka'; fs.style.cssText = 'margin:6px 0;font-size:14px';
+           fs.onclick = () => { canvas.requestFullscreen({ navigationUI: 'hide' }).then(() => canvas.focus(), e => console.log('fullscreen: ' + e)); };
+           document.body.append(fs); }
 const pre = document.createElement('pre'); document.body.append(pre);
 if (gpu) pre.style.cssText = 'max-height:30vh;overflow:auto;font-size:11px';
 // ?logpost: the log also goes to the server (POST /log, web/tools/wc3-dev-server.mjs keeps it in
@@ -61,6 +65,9 @@ if (gpu) {
       const ir = r.imageRect(), k = canvas.clientWidth / (canvas.width || 1);
       return { x: ir.x * k, y: ir.y * k, w: ir.w * k, h: ir.h * k }; } });
     (globalThis as any).wc3Input = inp;
+    // sound: the context starts on the first click or key (the browser's rule)
+    attachAudio(p, { log, gestureTarget: window }).then(a => { (globalThis as any).wc3Audio = a; log('[page] audio attached'); },
+                                                       e => log('[page] no audio: ' + e));
     canvas.tabIndex = 0; canvas.focus();
     const every = +(q.get('shot') ?? 0);
     if (every > 0) setInterval(async () => {

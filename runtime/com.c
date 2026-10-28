@@ -2315,13 +2315,17 @@ int com_call(CPU *c, uint32_t magic){
     if (g_dxrec_depth) dxrec_note(c, (int)iface, mid, nargs);
     if (g_fxtr && fxtr_now()) fxtr_dev(c, (int)iface, mid, nargs, nm);
     /* ZSEQ=<frame>: the order of target / Z surface / Clear / Z state in that frame (diagnostic) */
-    if (iface==IF_DEV && ENVC("ZSEQ") && g_present_no == (uint32_t)atoi(ENVC("ZSEQ"))){
+    /* ZSEQ=%N: every N-th frame (WC3: one in game without knowing its number) */
+    if (iface==IF_DEV && ENVC("ZSEQ") && (ENVC("ZSEQ")[0] == '%' ? (atoi(ENVC("ZSEQ") + 1) > 0 && g_present_no % (uint32_t)atoi(ENVC("ZSEQ") + 1) == 0)
+                                                               : g_present_no == (uint32_t)atoi(ENVC("ZSEQ")))){
         static unsigned nd = 0;
         if (nm[0]=='D' && nm[1]=='r'){ nd++; }
         else if (MID(SetRenderTarget) || MID(SetDepthStencilSurface) || MID(Clear)
                  || (MID(SetRenderState) && (A(c,1)==7||A(c,1)==14||A(c,1)==23))
-                 || MID(BeginScene) || MID(EndScene) || MID(StretchRect)){
+                 || MID(BeginScene) || MID(EndScene) || MID(StretchRect) || MID(SetViewport)){
             if (nd){ fprintf(stderr, "  [zseq]   .. %u draws\n", nd); nd = 0; }
+            if (MID(SetViewport) && A(c,1) && mem_is_committed(A(c,1)+23))
+                fprintf(stderr, "  [zseq] viewport %u,%u %ux%u\n", MR32(A(c,1)), MR32(A(c,1)+4), MR32(A(c,1)+8), MR32(A(c,1)+12));
             uint32_t s2 = A(c,2);
             fprintf(stderr, "  [zseq] %s %x %x %x %x  (rt=%u", nm, A(c,1), A(c,2), A(c,3), A(c,4), g_cur_rt);
             if ((MID(SetRenderTarget)||MID(SetDepthStencilSurface)) && s2 && mem_is_committed(s2+47))
@@ -2493,6 +2497,12 @@ int com_call(CPU *c, uint32_t magic){
                 { uint32_t dw = w4, dh = h4;
                   res_pick(w4, h4, &dw, &dh);
                   w4 = dw; h4 = dh; }
+                /* windowed 0x0 = the window's client size (WC3: 1280x720); the
+                 * renderer then keeps that back buffer and scales it to the
+                 * canvas.  Left at 0 it took the canvas size while the game
+                 * drew for 1280x720: viewport scissors (game view, portrait)
+                 * landed in the wrong place, in fullscreen more so. */
+                if ((!w4 || !h4) && win4){ w4 = g_bb_w ? g_bb_w : 1280u; h4 = g_bb_h ? g_bb_h : 720u; }
                 if (w4 && h4){
                     g_bb_w = w4; g_bb_h = h4;
                     void metal_want_size(unsigned,unsigned);
