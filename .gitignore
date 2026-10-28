@@ -34,3 +34,6 @@ __pycache__/
 *.a
 *.log
 .DS_Store
+
+# the NAS deployment settings (tunnel token)
+deploy/qnap/.env

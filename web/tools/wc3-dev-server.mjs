@@ -23,6 +23,9 @@ const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? proces
 const DATA = arg('--data');
 const PORT = +arg('--port', 8086);
 const HOST = arg('--host', '127.0.0.1');   // 0.0.0.0: reachable from the LAN (Chrome there needs a secure origin)
+// the game module and where the test pages' logs and screenshots go (Docker: a volume each)
+const WASM = arg('--wasm', path.join(ROOT, 'out', 'web', 'wc3.wasm'));
+const OUT = arg('--out', path.join(ROOT, 'out'));
 if (!DATA || !fs.statSync(DATA, { throwIfNoEntry: false })?.isDirectory()) {
   console.error('usage: node web/tools/wc3-dev-server.mjs --data "<Warcraft III folder>" [--port 8086]'); process.exit(2);
 }
@@ -31,6 +34,8 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
   '.wasm': 'application/wasm', '.css': 'text/css', '.txt': 'text/plain; charset=utf-8' };
 const ISOLATION = { 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp',
   'Cross-Origin-Resource-Policy': 'same-origin', 'Cache-Control': 'no-store' };
+// files: revalidated each time (ETag from size and time), so the 81 MB module comes once until it changes
+const CACHED = { ...ISOLATION, 'Cache-Control': 'no-cache' };
 
 // the manifest: files and folders, '/'-separated paths relative to the game folder
 function manifest() {
@@ -56,7 +61,9 @@ function inside(root, rel) {
 function sendFile(req, res, full, type) {
   let st; try { st = fs.statSync(full); } catch { res.writeHead(404, ISOLATION).end('not found'); return; }
   if (!st.isFile()) { res.writeHead(404, ISOLATION).end('not found'); return; }
-  const h = { ...ISOLATION, 'Content-Type': type ?? TYPES[path.extname(full).toLowerCase()] ?? 'application/octet-stream', 'Accept-Ranges': 'bytes' };
+  const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+  const h = { ...CACHED, ETag: etag, 'Content-Type': type ?? TYPES[path.extname(full).toLowerCase()] ?? 'application/octet-stream', 'Accept-Ranges': 'bytes' };
+  if (req.headers['if-none-match'] === etag && !req.headers.range) { res.writeHead(304, h).end(); return; }
   const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '');
   if (m) {
     const start = +m[1], end = m[2] ? Math.min(+m[2], st.size - 1) : st.size - 1;
@@ -131,7 +138,7 @@ const server = http.createServer((req, res) => {
     const parts = []; let n = 0;
     req.on('data', d => { parts.push(d); n += d.length; if (n > 32e6) req.destroy(); });
     req.on('end', () => {
-      fs.writeFileSync(path.join(ROOT, 'out', 'shot.png'), Buffer.concat(parts));
+      fs.writeFileSync(path.join(OUT, 'shot.png'), Buffer.concat(parts));
       res.writeHead(204, ISOLATION).end();
     });
     return;
@@ -140,7 +147,7 @@ const server = http.createServer((req, res) => {
     let body = ''; req.setEncoding('utf8');
     req.on('data', d => { body += d; if (body.length > 8e6) req.destroy(); });
     req.on('end', () => {
-      const f = path.join(ROOT, 'out', 'browser.log');
+      const f = path.join(OUT, 'browser.log');
       if (body.startsWith('@@start')) fs.writeFileSync(f, body); else fs.appendFileSync(f, body);
       res.writeHead(204, ISOLATION).end();
     });
@@ -149,8 +156,13 @@ const server = http.createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, ISOLATION).end(); return; }
   if (p === '/data-manifest') { res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json' }).end(MANIFEST); return; }
   if (p.startsWith('/data/')) { const f = inside(DATA, p.slice(6)); return f ? sendFile(req, res, f) : res.writeHead(403, ISOLATION).end(); }
-  if (p === '/wc3.wasm') return sendFile(req, res, path.join(ROOT, 'out', 'web', 'wc3.wasm'));
-  if (p === '/') { res.writeHead(302, { ...ISOLATION, Location: '/test/hostcheck.html' }).end(); return; }
+  if (p === '/wc3.wasm') return sendFile(req, res, WASM);
+  // the start page: a name, then the game (web/landing.html); without it the test page
+  if (p === '/') {
+    const land = path.join(ROOT, 'web', 'landing.html');
+    if (fs.existsSync(land)) return sendFile(req, res, land);
+    res.writeHead(302, { ...ISOLATION, Location: '/test/hostcheck.html' }).end(); return;
+  }
   for (const root of STATIC) {
     const f = inside(root, p.slice(1));
     if (f && fs.existsSync(f) && fs.statSync(f).isFile()) return sendFile(req, res, f);
