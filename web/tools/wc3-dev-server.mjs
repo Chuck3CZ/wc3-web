@@ -138,7 +138,7 @@ const server = http.createServer((req, res) => {
     const parts = []; let n = 0;
     req.on('data', d => { parts.push(d); n += d.length; if (n > 32e6) req.destroy(); });
     req.on('end', () => {
-      fs.writeFileSync(path.join(OUT, 'shot.png'), Buffer.concat(parts));
+      try { fs.writeFileSync(path.join(OUT, 'shot.png'), Buffer.concat(parts)); } catch (e) { console.log('[dev-server] shot: ' + e.message); }
       res.writeHead(204, ISOLATION).end();
     });
     return;
@@ -148,7 +148,7 @@ const server = http.createServer((req, res) => {
     req.on('data', d => { body += d; if (body.length > 8e6) req.destroy(); });
     req.on('end', () => {
       const f = path.join(OUT, 'browser.log');
-      if (body.startsWith('@@start')) fs.writeFileSync(f, body); else fs.appendFileSync(f, body);
+      try { if (body.startsWith('@@start')) fs.writeFileSync(f, body); else fs.appendFileSync(f, body); } catch (e) { console.log('[dev-server] log: ' + e.message); }
       res.writeHead(204, ISOLATION).end();
     });
     return;
