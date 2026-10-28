@@ -121,8 +121,17 @@ static void *wd_main(void *arg){
     double lim = *(double *)arg;
     pthread_setname_np("watchdog");
     int reported = 0; uint64_t last_rep = 0;
+    /* WC3_PROFILE=N: the import and D3D8 counts every N s, stalled or not */
+    const char *pe = getenv("WC3_PROFILE"); int prof = pe && *pe ? atoi(pe) : 0, tick = 0;
     for (;;){
         sleep(1);
+        if (prof > 0 && ++tick % prof == 0){
+            void win32_hot_report(void), d3d8_hot_report(void);
+            pthread_mutex_lock(&g_wd_mx);
+            fprintf(stderr, "\n[profile] last %d s (%ld frames so far):\n", prof, atomic_load(&g_wd_frames));
+            win32_hot_report(); d3d8_hot_report();
+            pthread_mutex_unlock(&g_wd_mx);
+        }
         uint64_t last = atomic_load(&g_wd_present_us);
         if (!last) continue;                     /* not armed before the first frame */
         if (lifecycle_game_parked()){            /* parked in the background: not a stall; */

@@ -252,6 +252,7 @@ static unsigned g_tfq_h = 0, g_tfq_n = 0;
 static unsigned fmt_blk(unsigned f, unsigned *bpb){
     switch (f){
     case 21: case 22: *bpb = 4; return 1;                 /* A8R8G8B8, X8R8G8B8 */
+    case 23: case 25: case 26: *bpb = 2; return 1;        /* R5G6B5, A1R5G5B5, A4R4G4B4 (WC3) */
     case 28: case 41: *bpb = 1; return 1;                 /* A8, "L8" (P8, as on the Mac) */
     case 0x31545844: *bpb = 8; return 4;                  /* DXT1 */
     case 0x33545844: case 0x35545844: *bpb = 16; return 4;/* DXT3, DXT5 */
@@ -268,6 +269,21 @@ unsigned metal_level_rows(unsigned h, unsigned level, unsigned f){
     unsigned lh = h >> level; if (!lh) lh = 1;
     return blk == 1 ? lh : (lh + blk - 1) / blk;
 }
+/* WebGPU has no 16-bit colour formats: the game keeps its 16-bit lock
+ * buffers (fmt_blk), the page gets A8R8G8B8 and tex_upload widens each row */
+static int fmt16(unsigned f){ return f == 23u || f == 25u || f == 26u; }
+static void widen16(uint32_t *dst, const uint16_t *src, unsigned n, unsigned f){
+    for (unsigned i = 0; i < n; i++){
+        uint32_t v = src[i], a, r, g, b;
+        if (f == 23u){ a = 255; r = (v >> 11) & 31; g = (v >> 5) & 63; b = v & 31;
+                       r = (r << 3) | (r >> 2); g = (g << 2) | (g >> 4); b = (b << 3) | (b >> 2); }
+        else if (f == 25u){ a = (v & 0x8000u) ? 255 : 0; r = (v >> 10) & 31; g = (v >> 5) & 31; b = v & 31;
+                       r = (r << 3) | (r >> 2); g = (g << 3) | (g >> 2); b = (b << 3) | (b >> 2); }
+        else { a = (v >> 12) & 15; r = (v >> 8) & 15; g = (v >> 4) & 15; b = v & 15;
+               a *= 17; r *= 17; g *= 17; b *= 17; }
+        dst[i] = a << 24 | r << 16 | g << 8 | b;
+    }
+}
 static unsigned tex_new(unsigned w, unsigned h, unsigned levels, unsigned f, unsigned rt, unsigned cube){
     gw_init();
     unsigned bpb;
@@ -282,7 +298,7 @@ static unsigned tex_new(unsigned w, unsigned h, unsigned levels, unsigned f, uns
     g_tex[id].fmt = f; g_tex[id].lvlmask = 0;
     g_tex_created++;
     GwCmd *c = rq_begin(GW_TEX_CREATE, 0);
-    if (c){ c->a[0] = id; c->a[1] = w; c->a[2] = h; c->a[3] = levels; c->a[4] = f;
+    if (c){ c->a[0] = id; c->a[1] = w; c->a[2] = h; c->a[3] = levels; c->a[4] = fmt16(f) ? 21u : f;
             c->a[5] = (rt ? GW_TF_RT : 0) | (cube ? GW_TF_CUBE : 0); rq_commit(c); }
     return id;
 }
@@ -339,6 +355,17 @@ static void tex_upload(unsigned id, unsigned level, unsigned face, const void *d
     if (g_tex[id].cube && face > 5u) face = 0;
     if (level < 32u) g_tex[id].lvlmask |= 1u << level;
     g_tex_uploaded++;
+    if (fmt16(f)){
+        uint32_t p4 = lw * 4u, bytes = p4 * rows;
+        GwCmd *c = rq_begin(GW_TEX_UPLOAD, bytes);
+        if (!c) return;
+        c->a[0] = id; c->a[1] = level | (face << 16); c->a[2] = lw; c->a[3] = lh; c->a[4] = p4; c->a[5] = rows;
+        for (unsigned y = 0; y < rows; y++)
+            widen16((uint32_t *)((uint8_t *)c + GW_CMD_HDR + (size_t)y * p4),
+                    (const uint16_t *)((const uint8_t *)data + (size_t)y * pitch), lw, f);
+        rq_commit(c);
+        return;
+    }
     uint32_t bytes = pitch * rows;
     GwCmd *c = rq_begin(GW_TEX_UPLOAD, bytes);
     if (!c) return;
@@ -794,6 +821,11 @@ void com_request_reset(void);
 static void view_follow(void){
     static unsigned seen_w, seen_h; static double since = 0, asked = 0;
     if (!g_ctl || ald(&g_ctl->attached) != GW_ATTACHED || !g_view_used_w) return;
+    /* WC3: its windowed Reset keeps the window's size (1280x720), so asking
+     * for the canvas size looped forever (a reset every 2 s, nothing drawn);
+     * the device stays as created and the page scales the picture.
+     * WC3_VIEW_FOLLOW=1 asks anyway. */
+    { static int vf = -1; if (vf < 0){ const char *e = getenv("WC3_VIEW_FOLLOW"); vf = e && *e == '1'; } if (!vf) return; }
     unsigned w = g_ctl->view_w & ~1u, h = g_ctl->view_h & ~1u;
     if (w < 320u || h < 240u || (w == g_view_used_w && h == g_view_used_h)) { seen_w = w; seen_h = h; return; }
     double t = now_ms();

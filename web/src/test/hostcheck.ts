@@ -2,8 +2,14 @@
 // (pool, I/O worker, mounts) and reports its output; title becomes DONE.
 import { startProcess } from '../host/process';
 import { attachNet } from '../net/index';
+import { attachRenderer } from '../gpu/index';
 const q = new URLSearchParams(location.search);
+const gpu = q.has('gpu');
+const canvas = document.createElement('canvas');
+if (gpu) { canvas.width = 1280; canvas.height = 720; canvas.style.cssText = 'display:block;width:1280px;max-width:100%;background:#000';
+           document.body.append(canvas); }
 const pre = document.createElement('pre'); document.body.append(pre);
+if (gpu) pre.style.cssText = 'max-height:30vh;overflow:auto;font-size:11px';
 // ?logpost: the log also goes to the server (POST /log, web/tools/wc3-dev-server.mjs keeps it in
 // out/browser.log), so a run can be read without copying it from the page
 const posting = q.has('logpost');
@@ -30,6 +36,7 @@ const env0: Record<string, string> = {};
 if (q.get('reg')) { await preload(q.get('reg')!, 'registry.txt'); env0.NFSU2_REGFILE = '/save/registry.txt'; }
 // ?script=/tests/scripts/x.txt: an autotest input script, copied into the save dir
 const env: Record<string, string> = env0;
+if (gpu) env.NFSU2_RENDERER = 'webgpu';
 const script = q.get('script');
 if (script) {
   const txt = await (await fetch(script, { cache: 'no-store' })).text();
@@ -44,6 +51,17 @@ const p = await startProcess({
   onLog: (s, fd, tid) => log(`[${tid}${fd === 2 ? '!' : ''}] ${s}`),
   onNote: log,
 });
+if (gpu) {
+  try {
+    const r = await attachRenderer(p, canvas, { log });
+    log('[page] WebGPU renderer attached');
+    const every = +(q.get('shot') ?? 0);
+    if (every > 0) setInterval(async () => {
+      try { const png = await r.dump('shot'); await fetch('/shot', { method: 'POST', body: png }); }
+      catch (e) { log(`[page] screenshot: ${e}`); }
+    }, every * 1000);
+  } catch (e) { log(`[page] no renderer: ${e}`); }
+}
 // ?net=<name>: the virtual LAN (web/src/net) under that player name; the notices the app shows over the game, logged
 const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log, onNotice: t => log(`[notice] ${t}`), onLobby: j => log(`[lobby] ${j}`) }) : null;
 (globalThis as any).nfsu2Net = net;

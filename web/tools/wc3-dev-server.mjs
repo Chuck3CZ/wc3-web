@@ -9,6 +9,7 @@
 //                                        manifest without "blocks": it reads byte ranges)
 //   /data/<path>                         the game folder's files, with Range
 //   POST /log                            the test page's log -> out/browser.log
+//   POST /shot                           the test page's screenshot -> out/shot.png
 // with the headers that make the page cross-origin isolated (SharedArrayBuffer).
 // Port 8086: 8080 is the QNAP's admin page (docs/PLAN.md).
 import http from 'node:http';
@@ -73,6 +74,16 @@ http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = decodeURIComponent(url.pathname);
   // the test page's log (hostcheck.ts ?logpost): out/browser.log, started over by a new run
+  // the test page's screenshot (hostcheck.ts ?gpu&shot=N): out/shot.png, replaced each time
+  if (req.method === 'POST' && p === '/shot') {
+    const parts = []; let n = 0;
+    req.on('data', d => { parts.push(d); n += d.length; if (n > 32e6) req.destroy(); });
+    req.on('end', () => {
+      fs.writeFileSync(path.join(ROOT, 'out', 'shot.png'), Buffer.concat(parts));
+      res.writeHead(204, ISOLATION).end();
+    });
+    return;
+  }
   if (req.method === 'POST' && p === '/log') {
     let body = ''; req.setEncoding('utf8');
     req.on('data', d => { body += d; if (body.length > 8e6) req.destroy(); });
