@@ -575,6 +575,8 @@ enum {
     MID_Capture,
     MID_GetFunction,
     MID_GetDeclaration,
+    MID_MultiplyTransform,
+    MID_GetLightEnable,
     MID__count
 };
 static const char *const g_midname[MID__count] = {
@@ -706,7 +708,17 @@ static const char *const g_midname[MID__count] = {
     "Capture",
     "GetFunction",
     "GetDeclaration",
+    "MultiplyTransform",
+    "GetLightEnable",
 };
+/* ffp.c: the fixed-function vertex stage (WC3) */
+void ffp_init(void);
+void ffp_set_transform(uint32_t, uint32_t); void ffp_multiply_transform(uint32_t, uint32_t); int ffp_get_transform(uint32_t, uint32_t);
+void ffp_set_light(uint32_t, uint32_t); int ffp_get_light(uint32_t, uint32_t);
+void ffp_light_enable(uint32_t, uint32_t); int ffp_light_enabled(uint32_t);
+void ffp_set_material(uint32_t); int ffp_get_material(uint32_t);
+void ffp_set_viewport(uint32_t); int ffp_get_viewport(uint32_t);
+int  ffp_vertex(uint32_t fvf, uint32_t o, TVert *out);
 static int mid_resolve(const char *nm){
     for (int i = 1; i < MID__count; i++)
         if (nm[0] == g_midname[i][0] && !strcmp(nm, g_midname[i])) return i;
@@ -1864,6 +1876,8 @@ static int draw_up(uint32_t pt, uint32_t nv, uint32_t vp, uint32_t stride){
                 if (ci > 3u) ci = (unsigned)ts;
                 for (int tc = 0; tc < 4; tc++) out->t[ts][tc] = so.tex[ci][tc];
             }
+        } else if (!d && g_cur_fvf && ffp_vertex(g_cur_fvf, o, out)){
+            /* fixed function: ffp.c */
         } else {
             float pos[4], col[4], uv[4];
             decl_fetch(o + (unsigned)p_off, (unsigned)p_type, pos);
@@ -2524,6 +2538,7 @@ int com_call(CPU *c, uint32_t magic){
                 }
             }
             uint32_t pp=A(c,6); if(pp) MR32(pp)=g_dev;
+            ffp_init();                          /* fixed-function defaults (lighting on, ...) */
             fprintf(stderr,"com: IDirect3DDevice9 created 0x%08x (%ux%u)\n",
                     g_dev, g_bb_w, g_bb_h);
             r=0; }
@@ -3454,9 +3469,19 @@ int com_call(CPU *c, uint32_t magic){
                 if (tid) g_rt_set++; else g_rt_screen++;
             }
             r=0; }
+        else if (MID(SetLight)){ ffp_set_light(A(c,1), A(c,2)); r=0; }
+        else if (MID(LightEnable)){ ffp_light_enable(A(c,1), A(c,2)); r=0; }
+        else if (MID(GetLightEnable)){ uint32_t p=A(c,2); if (p){ mem_commit(p,4); MR32(p)=(uint32_t)ffp_light_enabled(A(c,1)); } r=0; }
+        else if (MID(SetMaterial)){ ffp_set_material(A(c,1)); r=0; }
+        else if (MID(MultiplyTransform)){ ffp_multiply_transform(A(c,1), A(c,2)); r=0; }
+        else if (MID(GetTransform)){ r = ffp_get_transform(A(c,1), A(c,2)) ? 0u : 0x8876086Cu; }
+        else if (MID(GetLight)){ r = ffp_get_light(A(c,1), A(c,2)) ? 0u : 0x8876086Cu; }
+        else if (MID(GetMaterial)){ r = ffp_get_material(A(c,1)) ? 0u : 0x8876086Cu; }
+        else if (MID(GetViewport)){ r = ffp_get_viewport(A(c,1)) ? 0u : 0x8876086Cu; }
         else if (MID(SetTransform)){
             static int nt=0;
             uint32_t ty=A(c,1), mp=A(c,2);
+            ffp_set_transform(ty, mp);
             /* XFORMAT=<frame>: ALL SetTransform calls of that frame only. */
             { static long xa = -2; if (xa == -2){ const char *e = ENVC("XFORMAT"); xa = e ? atol(e) : -1; }
               if (xa >= 0 && (long)g_present_no == xa && mp && mem_is_committed(mp+63)){
@@ -3478,6 +3503,7 @@ int com_call(CPU *c, uint32_t magic){
         else if (MID(SetViewport)){
             static int nv2=0;
             uint32_t vp2=A(c,1);
+            ffp_set_viewport(vp2);
             if (ENVC("XFORM") && nv2<6 && vp2 && mem_is_committed(vp2+23)){ nv2++;
                 fprintf(stderr,"  [SetViewport] x=%u y=%u g=%u y=%u minZ=%.3f maxZ=%.3f\n",
                         MR32(vp2), MR32(vp2+4), MR32(vp2+8), MR32(vp2+12),
@@ -3500,7 +3526,7 @@ int com_call(CPU *c, uint32_t magic){
                 g_vsk.b[sr+k]=(int32_t)MR32(o);
             }
             r=0; }
-        else if (MID(SetVertexDeclaration)){ g_cur_decl=A(c,1); g_raw_decl=g_cur_decl; r=0; }
+        else if (MID(SetVertexDeclaration)){ g_cur_decl=A(c,1); g_raw_decl=g_cur_decl; if (g_cur_decl) g_cur_fvf=0; r=0; }
         else if (MID(Reset)){
             /* (this, D3DPRESENT_PARAMETERS*)
              * The game resets the device when resolution/graphics detail changes.
@@ -3570,7 +3596,7 @@ int com_call(CPU *c, uint32_t magic){
                 g_ss_vb = 0; g_ib_obj = 0;
             }
             r=0; }
-        else if (MID(SetFVF)){ g_cur_fvf=A(c,1); g_raw_fvf=g_cur_fvf; r=0; }
+        else if (MID(SetFVF)){ g_cur_fvf=A(c,1); g_raw_fvf=g_cur_fvf; if (g_cur_fvf) g_cur_decl=0; r=0; }
         else if (MID(CreateTexture)){
             /* (this,W,H,Levels,Usage,Format,Pool,ppTex,pShared) */
             uint32_t w=A(c,1), h=A(c,2), lev=A(c,3), usage=A(c,4), fmt=A(c,5), pool=A(c,6);
