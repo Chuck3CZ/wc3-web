@@ -134,7 +134,7 @@ uint32_t win32_heap_used(void){ uint64_t v = 0; heap_totals(0, 0, &v, 0); return
 uint32_t win32_heap_live(void){ uint64_t l = 0; heap_totals(&l, 0, 0, 0); return (uint32_t)l; }
 
 /* --- tracing --- */
-typedef struct { uint32_t calls; uint32_t unimpl; } ImpStat;
+typedef struct { uint32_t calls; uint32_t unimpl; uint32_t from; uint32_t seen; } ImpStat;
 static ImpStat *stat_;
 static uint32_t trace_n = 0, trace_max = 0;
 void win32_set_trace_max(uint32_t v){ trace_max = v; }
@@ -343,7 +343,7 @@ int win32_call(CPU *c, uint32_t idx){
     if (idx >= g_nimps) return 0;
     const ImpEnt *e = &g_imps[idx];
     { void win32_thread_term_check(CPU*); win32_thread_term_check(c); }   /* TerminateThread */
-    stat_[idx].calls++; g_win32_calls++;
+    stat_[idx].calls++; stat_[idx].from = MR32(c->esp); g_win32_calls++;
     cryptwatch(c, e, (uint32_t)g_win32_calls);
     guest_fair_yield();          /* give the other guest threads a turn */
     POP32(c->eip);                      /* take the return address */
@@ -706,6 +706,28 @@ void win32_init(void){
     com_init();
     { void watchdog_start(void); watchdog_start(); }      /* NFSU2_WATCHDOG */
     fprintf(stderr,"win32: %u imports of %d modules + %u GetProcAddress-only functions\n", g_nmodimps, g_modtab_count, NDYNIMP);
+}
+
+/* For the watchdog: the imports called most since its last report, with the
+ * caller of the latest call: what a loop that never presents is doing. */
+void win32_hot_report(void){
+    if (!stat_) return;
+    uint32_t done[40]; int nd = 0;
+    fprintf(stderr, "  imports called since the last report:\n");
+    for (int k = 0; k < 40; k++){
+        uint32_t best = 0, bi = 0;
+        for (uint32_t i = 0; i < g_nimps; i++){
+            uint32_t d = stat_[i].calls - stat_[i].seen; int skip = 0;
+            for (int j = 0; j < nd; j++) if (done[j] == i) skip = 1;
+            if (!skip && d > best){ best = d; bi = i; }
+        }
+        if (!best) break;
+        done[nd++] = bi;
+        const char *mod = 0; uint32_t f = module_nearest_fn(stat_[bi].from, &mod);
+        fprintf(stderr, "    %-28s %8u  last from 0x%08x (%s sub_%08x)\n", g_imps[bi].name, best,
+                stat_[bi].from, mod ? mod : "?", f);
+    }
+    for (uint32_t i = 0; i < g_nimps; i++) stat_[i].seen = stat_[i].calls;
 }
 
 void win32_report(void){

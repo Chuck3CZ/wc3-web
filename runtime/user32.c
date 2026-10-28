@@ -83,9 +83,11 @@ static Win *win_of(uint32_t h){
 }
 static uint32_t hwnd_of(const Win *w){ return HWND_BASE + 4u * (uint32_t)(w - g_win); }
 
+static int msglog(void); static uint32_t ctid(CPU *c);
 static uint32_t send_msg(CPU *c, uint32_t h, uint32_t m, uint32_t wp, uint32_t lp){
     Win *w = win_of(h);
     if (!w || !w->proc) return 0;
+    if (msglog()) fprintf(stderr, "[msg] send   tid %u  hwnd 0x%08x msg 0x%04x wp 0x%08x lp 0x%08x\n", ctid(c), h, m, wp, lp);
     const uint32_t a[4] = { h, m, wp, lp };
     return call_guest(c, w->proc, 4, a);
 }
@@ -171,6 +173,15 @@ static int take_msg(uint32_t pm, int remove){
 }
 
 static uint32_t A(CPU *c, int i){ return MR32(c->esp + 4u*(uint32_t)i); }
+/* WC3_MSGLOG=1: messages taken (and by which thread), posted, sent, and the
+ * window calls around them; the first WC3_MSGLOG_MAX (default 400) lines */
+static int msglog(void){
+    static int v = -1, n = 0, max = 400;
+    if (v < 0){ const char *e = getenv("WC3_MSGLOG"); v = e && *e == '1';
+                const char *m = getenv("WC3_MSGLOG_MAX"); if (m && *m) max = atoi(m); }
+    return v && n++ < max;
+}
+static uint32_t ctid(CPU *c){ return (c && c->fs_base && mem_is_committed(c->fs_base + 0x24u)) ? MR32(c->fs_base + 0x24u) : 0u; }
 static void cstr(uint32_t p, char *out, size_t n){
     out[0] = 0;
     if (p > 0xFFFFu && mem_is_committed(p)) snprintf(out, n, "%s", (const char *)(g_mem + p));
@@ -231,7 +242,7 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
         Win *w = &g_win[slot]; memset(w, 0, sizeof *w);
         w->used = 1; w->cls = k; w->proc = g_cls[k].proc;
         w->exstyle = A(c,0); w->style = A(c,3); w->parent = A(c,8); w->id = A(c,9); w->inst = A(c,10);
-        unsigned gw = 800, gh = 600; metal_game_size(&gw, &gh);
+        unsigned gw = 1280, gh = 720; metal_game_size(&gw, &gh); if (!gw || !gh){ gw = 1280; gh = 720; }
         int32_t x = (int32_t)A(c,4), y = (int32_t)A(c,5), ww = (int32_t)A(c,6), hh = (int32_t)A(c,7);
         if (x == (int32_t)0x80000000) x = 0;
         if (y == (int32_t)0x80000000) y = 0;
@@ -261,6 +272,7 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
     }
     else if (IS("ShowWindow")){
         Win *w = win_of(A(c,0)); uint32_t cmd = A(c,1);
+        if (msglog()) fprintf(stderr, "[msg] ShowWindow(0x%08x, %u) tid %u\n", A(c,0), cmd, ctid(c));
         r = w ? (uint32_t)w->visible : 0u;
         if (w){
             int show = cmd != 0;                              /* SW_HIDE = 0 */
@@ -290,11 +302,14 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
     else if (IS("SendMessageA")) r = send_msg(c, A(c,0), A(c,1), A(c,2), A(c,3));
     else if (IS("PostMessageA")){
         uint32_t h = A(c,0);
+        if (msglog()) fprintf(stderr, "[msg] post   tid %u  hwnd 0x%08x msg 0x%04x wp 0x%08x lp 0x%08x\n", ctid(c), h, A(c,1), A(c,2), A(c,3));
         if (h == 0xFFFFu){ for (int i = 0; i < NWIN; i++) if (g_win[i].used && !g_win[i].parent) q_post(hwnd_of(&g_win[i]), A(c,1), A(c,2), A(c,3)); }
         else q_post(h, A(c,1), A(c,2), A(c,3));
         r = 1;
     }
-    else if (IS("PostThreadMessageA")){ q_post(0, A(c,1), A(c,2), A(c,3)); r = 1; }
+    else if (IS("PostThreadMessageA")){
+        if (msglog()) fprintf(stderr, "[msg] postT  tid %u -> thread %u msg 0x%04x wp 0x%08x lp 0x%08x\n", ctid(c), A(c,0), A(c,1), A(c,2), A(c,3));
+        q_post(0, A(c,1), A(c,2), A(c,3)); r = 1; }
     else if (IS("PostQuitMessage")){ g_quit_posted = 1; g_quit_code = A(c,0); r = 0; }
     else if (IS("CallWindowProcA")){
         const uint32_t a[4] = { A(c,1), A(c,2), A(c,3), A(c,4) };
@@ -320,7 +335,9 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
         uint32_t pm = A(c,0);
         int remove = get ? 1 : (A(c,4) & 1u);
         if (g_main){ kbd_pump(); lifecycle_pump(); }
-        if (take_msg(pm, remove)) r = get ? (MR32(pm+4) != WM_QUIT) : 1u;
+        if (take_msg(pm, remove)){ r = get ? (MR32(pm+4) != WM_QUIT) : 1u;
+            if (remove && msglog()) fprintf(stderr, "[msg] %s tid %u  hwnd 0x%08x msg 0x%04x wp 0x%08x lp 0x%08x (from 0x%08x)\n",
+                                            get ? "get " : "peek", ctid(c), MR32(pm), MR32(pm+4), MR32(pm+8), MR32(pm+12), MR32(c->esp - 4)); }
         else if (!get) r = 0;
         else {
             /* GetMessage waits, with the guest lock released, for a message,
@@ -332,6 +349,8 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
                 if (g_main){ kbd_pump(); lifecycle_pump(); }
                 if (take_msg(pm, 1)) break;
             }
+            if (msglog()) fprintf(stderr, "[msg] get  tid %u  hwnd 0x%08x msg 0x%04x wp 0x%08x lp 0x%08x (waited)\n",
+                                  ctid(c), MR32(pm), MR32(pm+4), MR32(pm+8), MR32(pm+12));
             r = MR32(pm+4) != WM_QUIT;
         }
     }
@@ -343,7 +362,8 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
         } else if (pm) r = send_msg(c, MR32(pm), MR32(pm+4), MR32(pm+8), MR32(pm+12));
     }
     else if (IS("TranslateMessage")) r = 0;                       /* keyboard.c already posts WM_CHAR */
-    else if (IS("SetTimer"))  r = timer_set(A(c,0), A(c,1), A(c,2), A(c,3));
+    else if (IS("SetTimer")){ r = timer_set(A(c,0), A(c,1), A(c,2), A(c,3));
+        if (msglog()) fprintf(stderr, "[msg] SetTimer(0x%08x, %u, %u ms, proc 0x%08x) tid %u\n", A(c,0), A(c,1), A(c,2), A(c,3), ctid(c)); }
     else if (IS("KillTimer")) r = (uint32_t)timer_kill(A(c,0), A(c,1));
     else if (IS("GetWindowLongA") || IS("SetWindowLongA")){
         Win *w = win_of(A(c,0)); int32_t idx = (int32_t)A(c,1); int set = IS("SetWindowLongA"); uint32_t v = set ? A(c,2) : 0, *f = 0;
@@ -359,7 +379,7 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
     else if (IS("GetClassLongA")){ Win *w = win_of(A(c,0)); r = (w && (int32_t)A(c,1) == -24) ? g_cls[w->cls].proc : 0u; }
     else if (IS("GetClientRect") || IS("GetWindowRect")){
         Win *w = win_of(A(c,0)); uint32_t p = A(c,1);
-        unsigned gw = 800, gh = 600; metal_game_size(&gw, &gh);
+        unsigned gw = 1280, gh = 720; metal_game_size(&gw, &gh); if (!gw || !gh){ gw = 1280; gh = 720; }
         int32_t x = 0, y = 0, ww = (int32_t)gw, hh = (int32_t)gh;
         if (w){ ww = w->w; hh = w->h; if (IS("GetWindowRect")){ x = w->x; y = w->y; } }
         if (p){ mem_commit(p, 16); MR32(p) = (uint32_t)x; MR32(p+4) = (uint32_t)y; MR32(p+8) = (uint32_t)(x + ww); MR32(p+12) = (uint32_t)(y + hh); }

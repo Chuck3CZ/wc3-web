@@ -20,6 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const DATA = arg('--data');
 const PORT = +arg('--port', 8086);
+const HOST = arg('--host', '127.0.0.1');   // 0.0.0.0: reachable from the LAN (Chrome there needs a secure origin)
 if (!DATA || !fs.statSync(DATA, { throwIfNoEntry: false })?.isDirectory()) {
   console.error('usage: node web/tools/wc3-dev-server.mjs --data "<Warcraft III folder>" [--port 8086]'); process.exit(2);
 }
@@ -92,4 +93,4 @@ http.createServer((req, res) => {
     if (f && fs.existsSync(f) && fs.statSync(f).isFile()) return sendFile(req, res, f);
   }
   res.writeHead(404, ISOLATION).end('not found');
-}).listen(PORT, '127.0.0.1', () => console.log(`[dev-server] http://127.0.0.1:${PORT}/`));
+}).listen(PORT, HOST, () => console.log(`[dev-server] http://${HOST}:${PORT}/`));

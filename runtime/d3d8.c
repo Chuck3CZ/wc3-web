@@ -395,7 +395,27 @@ static void check_saved(CPU *c, const uint32_t *before, const char *nm){
                     k == 0 ? "ebx" : k == 1 ? "esi" : k == 2 ? "edi" : "ebp", before[k], now[k]);
     }
 }
+/* per method, for the watchdog: what the renderer calls between two reports */
+static uint32_t g_hot8[32][128], g_hot8_seen[32][128];
+void d3d8_hot_report(void){
+    int any = 0;
+    for (int k = 0; k < 16; k++){
+        uint32_t best = 0; int bi = -1, bm = -1;
+        for (int i = 0; i < 32; i++) for (int m = 0; m < 128; m++){
+            uint32_t d = g_hot8[i][m] - g_hot8_seen[i][m];
+            if (d > best){ best = d; bi = i; bm = m; } }
+        if (!best) break;
+        if (!any++) fprintf(stderr, "  D3D8 calls since the last report:\n");
+        int na = 0; const char *nm = com_method_name((uint32_t)bi, (uint32_t)bm, &na);
+        fprintf(stderr, "    if%-3d %-28s %8u\n", bi, nm ? nm : "?", best);
+        g_hot8_seen[bi][bm] = g_hot8[bi][bm];
+    }
+    if (!any) fprintf(stderr, "  D3D8 calls since the last report: none\n");
+    for (int i = 0; i < 32; i++) for (int m = 0; m < 128; m++) g_hot8_seen[i][m] = g_hot8[i][m];
+}
+
 int d3d8_call(CPU *c, uint32_t if8, uint32_t m){
+    if (if8 < 32 && m < 128) g_hot8[if8][m]++;
     const uint32_t saved[4] = { c->ebx, c->esi, c->edi, c->ebp };
     int r_ = d3d8_call_(c, if8, m);
     int n_ = 0; const char *nm_ = com_method_name(if8, m, &n_);

@@ -36,7 +36,7 @@ static unsigned g_tex_free[NTEX], g_ntex_free;
 static _Atomic int g_tex_lk;
 static void tex_lock(void){ int z; do { z = 0; } while (!atomic_compare_exchange_weak(&g_tex_lk, &z, 1)); }
 static void tex_unlock(void){ atomic_store(&g_tex_lk, 0); }
-static unsigned g_game_w, g_game_h;
+static unsigned g_game_w = 1280, g_game_h = 720;   /* without a renderer: the back buffer size (0x0 made the game think its window was minimized) */
 
 WEAK int  metal_available(void){ return 1; }
 WEAK int  metal_window_ready(void){ return 1; }

@@ -87,6 +87,7 @@ static void wd_report(double stalled, uint32_t flow){
     if (!n) fprintf(stderr, "  critical sections held: none\n");
     for (int k = 0; k < n; k++)
         fprintf(stderr, "  critical section 0x%08x held by tid %u (depth %d)\n", key[k], owner[k], depth[k]);
+    { void win32_hot_report(void), d3d8_hot_report(void); win32_hot_report(); d3d8_hot_report(); }
     fprintf(stderr, "[watchdog] end of report\n\n");
     pthread_mutex_unlock(&g_wd_mx);
 }
@@ -104,7 +105,7 @@ __attribute__((weak)) int lifecycle_game_parked(void){ return 0; }
  * before it makes the file.  Also with NFSU2_WATCHDOG=0. */
 void watchdog_log_download(void){
     uint64_t last = atomic_load(&g_wd_present_us);
-    uint32_t flow = mem_is_committed(0x8654a4u) ? MR32(0x8654a4u) : 0u;
+    uint32_t flow = 0u;   /* (NFSU2 game flow: none in WC3) */
     if (!last) fprintf(stderr, "[watchdog] log downloaded before the first frame (game flow %u)\n", flow);
     else {
         double ago = (wd_now_us() - last) / 1e6;
@@ -119,7 +120,7 @@ void watchdog_log_download(void){
 static void *wd_main(void *arg){
     double lim = *(double *)arg;
     pthread_setname_np("watchdog");
-    int reported = 0;
+    int reported = 0; uint64_t last_rep = 0;
     for (;;){
         sleep(1);
         uint64_t last = atomic_load(&g_wd_present_us);
@@ -128,10 +129,12 @@ static void *wd_main(void *arg){
             atomic_store(&g_wd_present_us, wd_now_us());   /* the limit restarts on return */
             reported = 0; continue; }
         double stalled = (wd_now_us() - last) / 1e6;
-        uint32_t flow = mem_is_committed(0x8654a4u) ? MR32(0x8654a4u) : 0u;
+        uint32_t flow = 0u;   /* (NFSU2 game flow: none in WC3) */
         double l = (flow == 3u || flow == 6u) ? lim : (lim > 20.0 ? lim : 20.0);
         if (stalled < l){ reported = 0; continue; }
-        if (!reported){ reported = 1; wd_report(stalled, flow); }
+        /* again every 20 s while it lasts: the import counts are per report */
+        if (!reported || wd_now_us() - last_rep >= 20000000ull){
+            reported = 1; last_rep = wd_now_us(); wd_report(stalled, flow); }
     }
     return 0;
 }
