@@ -2636,7 +2636,24 @@ int com_call(CPU *c, uint32_t magic){
                     uint32_t ifmt  = MR32(g_ib_obj+12);
                     uint32_t isz   = (ifmt==102u) ? 4u : 2u;   /* INDEX32 : INDEX16 */
                     uint32_t ntri  = (pt==4u||pt==5u||pt==6u) ? nprim : 0u;
-                    if (!ntri || !vbase || !ibase){ g_dip_skip++; }
+                    if ((pt==2u || pt==3u) && vbase && ibase && g_ss_stride <= 64u){
+                        /* lines (WC3: the selection box, the minimap's camera
+                         * frame): the indices in order, then draw_up's line path */
+                        if (!g_idx_scratch) g_idx_scratch = gbuf_alloc(4096u*64u);
+                        uint32_t nv = (pt==2u) ? nprim*2u : nprim+1u, ok = 1;
+                        if (nv > 4094u) nv = 4094u & ~1u;
+                        for (uint32_t k=0; k<nv && ok; k++){
+                            uint32_t ia = ibase + (starti + k)*isz;
+                            if (!mem_is_committed(ia+isz-1u)){ ok=0; break; }
+                            uint32_t vi = (isz==2u) ? MR16(ia) : MR32(ia);
+                            uint32_t src = vbase + (basev + vi)*g_ss_stride;
+                            if (!mem_is_committed(src + g_ss_stride - 1u)){ ok=0; break; }
+                            memcpy(g_mem + g_idx_scratch + k*g_ss_stride, g_mem+src, g_ss_stride);
+                        }
+                        if (ok){ draw_up(pt, nv, g_idx_scratch, g_ss_stride); g_dip_draws++; }
+                        else g_dip_skip++;
+                    }
+                    else if (!ntri || !vbase || !ibase){ g_dip_skip++; }
                     else if (dip_indexed(pt, basev, starti, ntri, isz)){
                         g_dip_draws++; g_dip_tris += ntri; }
                     else {
