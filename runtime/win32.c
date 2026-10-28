@@ -416,7 +416,12 @@ int win32_call(CPU *c, uint32_t idx){
         uint32_t i=ARG(c,0);
         uint32_t arr = (c->fs_base && mem_is_committed(c->fs_base+0x2cu)) ? MR32(c->fs_base+0x2cu) : 0;
         if (arr && i<256u && mem_is_committed(arr+4u*i)) r = MR32(arr+4u*i);
-        else r = (i<128)?tls_slot[i]:0; }
+        else r = (i<128)?tls_slot[i]:0;
+        /* Windows clears the last error when TlsGetValue succeeds, and code
+         * tells a stored NULL from a failure by it: WC3's Prop.cpp
+         * (Game.dll 0x16d98e0) took a stale ERROR_FILE_NOT_FOUND for "no
+         * property table" */
+        win32_set_last_error(c, 0); }
     else if (!strcmp(n,"TlsFree")){
         /* Windows clears the slot in every thread, so the next TlsAlloc of
          * this index reads NULL everywhere: here the main TEB, the created
@@ -517,6 +522,38 @@ int win32_call(CPU *c, uint32_t idx){
         if (fs && fss){ const char *v = "NTFS"; uint32_t l = 4; if (l >= fss) l = fss - 1; memcpy(g_mem+fs, v, l); MR8(fs+l) = 0; }
         r = 1; }
     else if (!strcmp(n,"ImmAssociateContextEx")) r = 1;
+    else if (!strcmp(n,"ImmAssociateContext")) r = 0;                 /* the previous input context: none */
+    /* (app, key, default, buf, size): no win.ini, every key has its default */
+    else if (!strcmp(n,"GetProfileStringA")){
+        uint32_t def = ARG(c,2), buf = ARG(c,3), sz = ARG(c,4);
+        const char *d = def && mem_is_committed(def) ? (const char *)(g_mem + def) : "";
+        uint32_t l = (uint32_t)strlen(d);
+        if (buf && sz){ if (l >= sz) l = sz - 1; memcpy(g_mem + buf, d, l); MR8(buf + l) = 0; r = l; } else r = 0; }
+    else if (!strcmp(n,"GetSystemDefaultUILanguage")) r = 0x0405u;    /* cs-CZ: the folder is the Czech edition */
+    else if (!strcmp(n,"OpenEventA")){ win32_set_last_error(c, 2u); r = 0; }   /* no named event of another process */
+    else if (!strcmp(n,"SystemTimeToFileTime")){
+        /* SYSTEMTIME (wYear wMonth wDayOfWeek wDay wHour wMinute wSecond wMs) -> 100 ns since 1601 */
+        uint32_t st = ARG(c,0), ft = ARG(c,1);
+        if (st && ft && mem_is_committed(st + 15)){
+            int y = MR16(st), mo = MR16(st+2), d = MR16(st+6);
+            static const int cum[12] = { 0,31,59,90,120,151,181,212,243,273,304,334 };
+            if (mo < 1 || mo > 12){ r = 0; }
+            else {
+                int64_t yy = y - 1601;
+                int64_t days = yy * 365 + yy / 4 - yy / 100 + yy / 400 + cum[mo - 1] + (d - 1);
+                if (mo > 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0)) days++;
+                uint64_t t = ((((uint64_t)days * 24u + MR16(st+8)) * 60u + MR16(st+10)) * 60u + MR16(st+12)) * 10000000ull
+                           + (uint64_t)MR16(st+14) * 10000ull;
+                mem_commit(ft, 8); MR32(ft) = (uint32_t)t; MR32(ft+4) = (uint32_t)(t >> 32); r = 1;
+            }
+        } else r = 0; }
+    /* COM: no class is registered.  WC3's movie player asks for DirectShow's
+     * filter graph (CoCreateInstance(CLSID_FilterGraph)) and skips the movie
+     * when that fails; a success without an object sent it into NULL vtables.
+     * The movies come back later as AV1 (docs/PLAN.md). */
+    else if (!strcmp(n,"CoCreateInstance")){ uint32_t pp = ARG(c,4); if (pp && mem_is_committed(pp)) MR32(pp) = 0; r = 0x80040154u; }   /* REGDB_E_CLASSNOTREG */
+    else if (!strcmp(n,"CoInitialize") || !strcmp(n,"CoInitializeEx")) r = 0;
+    else if (!strcmp(n,"CoUninitialize")) r = 0;
     else if (!strcmp(n,"MultiByteToWideChar")){ uint32_t src=ARG(c,2); int sl=(int)ARG(c,3);
         uint32_t dst=ARG(c,4); int dl=(int)ARG(c,5);
         if(sl<0) sl=(int)strlen((char*)(g_mem+src))+1;
@@ -606,6 +643,14 @@ int win32_call(CPU *c, uint32_t idx){
         r = com_directsoundcreate(ARG(c,1));
     else if (!strcmp(n,"SetConsoleCtrlHandler")) r = 1;
     else if (!strcmp(n,"RtlUnwind"))             r = 0;
+    else if (!strcmp(n,"RaiseException") && ARG(c,0) == 0x406D1388u){
+        /* MS_VC_EXCEPTION: the thread naming a debugger reads; the caller
+         * catches it itself (__except), and without a debugger nothing
+         * happens.  There is no SEH dispatch here, so it simply returns. */
+        static int said; if (said++ < 4 && ARG(c,3) && mem_is_committed(ARG(c,3) + 7)){
+            uint32_t nm = MR32(ARG(c,3) + 4);
+            fprintf(stderr, "[thread] named \"%.40s\"\n", nm && mem_is_committed(nm) ? (const char *)(g_mem + nm) : "?"); }
+        r = 0; }
     else if (!strcmp(n,"RaiseException")){
         /* There is no guest SEH dispatch, so continuing after a raise is
          * undefined behaviour.  Stop loudly instead; NFSU2_RAISE=continue

@@ -393,6 +393,22 @@ class RawLifter:
         self.md=Cs(CS_ARCH_X86,CS_MODE_32); self.md.detail=True
     in_text = lambda self,a: self.TVA<=a<self.TVA+self.TSZ
 
+def code_range(pe):
+    """(va, size, bytes) of the code: .text and the executable sections that
+    follow it without a gap of other sections (WC3's Mss32.dll keeps its
+    mixer in MSSMIXER, right after .text), from the mapped image (zeros past
+    each section's raw data).  A module with .text alone gets .text."""
+    ib = pe.OPTIONAL_HEADER.ImageBase
+    secs = sorted(pe.sections, key=lambda s: s.VirtualAddress)
+    i = next(k for k, s in enumerate(secs) if s.Name.rstrip(b'\0') == b'.text')
+    lo = secs[i].VirtualAddress; hi = lo + secs[i].Misc_VirtualSize
+    for s in secs[i + 1:]:
+        if not s.Characteristics & 0x20000000: break         # IMAGE_SCN_MEM_EXECUTE
+        hi = s.VirtualAddress + s.Misc_VirtualSize
+    mm = pe.get_memory_mapped_image()
+    data = bytes(mm[lo:hi]); data += bytes(hi - lo - len(data))
+    return ib + lo, hi - lo, data
+
 class Lifter:
     def __init__(self, pe_path, comments=True, trap=False, hooks=None, watch=False):
         self.comments=comments; self.trap=trap; self.traps=0; self.trap_kinds=collections.Counter()
@@ -403,7 +419,7 @@ class Lifter:
         for s in pe.sections:
             nm=s.Name.rstrip(b'\x00').decode('latin1').strip() or '<none>'
             self.secs.append((nm,self.IB+s.VirtualAddress,s.Misc_VirtualSize,s.get_data()))
-        self.TVA,self.TSZ,self.TDATA = next((va,vs,d) for nm,va,vs,d in self.secs if nm=='.text')
+        self.TVA,self.TSZ,self.TDATA = code_range(pe)
         self.md=Cs(CS_ARCH_X86,CS_MODE_32); self.md.detail=True
     def in_text(self,a): return self.TVA<=a<self.TVA+self.TSZ
 

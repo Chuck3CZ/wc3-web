@@ -424,6 +424,7 @@ int user32_call(CPU *c, const char *n, uint32_t *out){
         r = 1;
     }
     else if (IS("MapWindowPoints")) r = 0;
+    else if (IS("LoadImageA")) r = 0x00B10002u;                  /* icons and cursors: a placeholder handle (not drawn) */
     else return 0;
 #undef IS
     *out = r;

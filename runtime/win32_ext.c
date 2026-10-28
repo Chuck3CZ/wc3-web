@@ -1360,6 +1360,11 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
          * in the same frame); since the virtual clock advances at most
          * ~250 ms within a frame, it spun forever on the movie path.  Same
          * speed as rdtsc. */
+        /* WC3: the intro movies play through DirectShow (blizzard.ax), which
+         * the port does not have; with seenintromovie set the game skips them,
+         * as it does on Windows after the first start.  (The movies come back
+         * as AV1: docs/PLAN.md.)  WC3_MOVIES=1 asks for them anyway. */
+        else if (!strcasecmp(vn,"seenintromovie") && !getenv("WC3_MOVIES")){ dval=1; have_d=1; }
         else if (!strcasecmp(vn,"~MHz")){
             const char *e = getenv("NFSU2_TSC_MHZ"); dval = e && *e ? (uint32_t)strtoul(e,0,0) : 3000u; have_d=1; }
         else if (!strcasecmp(vn,"Install Dir"))   sval="C:\\NFSU2";

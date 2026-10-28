@@ -43,9 +43,10 @@ def main(src, base, outdir, genout, prefix):
     pe.write(img)
 
     pe = pefile.PE(img)
-    text = next(s for s in pe.sections if s.Name.rstrip(b'\0') == b'.text')
-    tlo = base + text.VirtualAddress
-    thi = tlo + text.Misc_VirtualSize
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from lift import code_range                    # .text and the code sections right after it
+    tlo, tsz, _ = code_range(pe)
+    thi = tlo + tsz
     entry = base + pe.OPTIONAL_HEADER.AddressOfEntryPoint
     seeds = [entry]
     exports = []

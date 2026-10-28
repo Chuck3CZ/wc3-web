@@ -57,6 +57,34 @@ Teď hra čte z MPQ (CD klíč projde, hlášky jsou česky z `War3xLocal.mpq`) 
 `LoadLibrary("d3d8.dll")` → `Direct3DCreate8` (zatím neimplementováno) → „Warcraft III nedokázal inicializovat
 rozhraní DirectX“. **To je krok 7.** Pozn.: výpis hlášek hry do logu je v CP1250 (rozsypané znaky) – převést na UTF-8.
 
+### Krok 7 – D3D8 a dál (2026-10-28)
+
+Testovací smyčka: `node web/tools/wc3-dev-server.mjs --data "<složka WC3>"`, v Chrome
+`http://localhost:8086/test/hostcheck.html?wasm=/wc3.wasm&pages=20480&arg=/data/war3.exe&env=WC3_SAVEDIR=/save&env=WC3_READONLY_DATA=1&logpost&fresh`
+– stránka posílá log na server do `out/browser.log` (`?logpost`). Ladění: `HOOKS=0x...,0x... ./gen.sh <WC3> game`
+(háčky před instrukcemi, výpis registrů; `WC3_HOOKDUMP=ebx%2B0x28,...`), `DUMP=*0xADDR:LEN`, `WC3_CRYPTWATCH=1`,
+`COMTRACE=1`, `TRACE_MAX=N`, `FILELIST=1`, `BT=1`.
+
+Hotovo a ověřeno v prohlížeči:
+- `runtime/d3d8.c` + `d3d8_tables.h`: D3D8 rozhraní nad objekty D3D9 z `com.c` (stejná signatura → přímo, jinak
+  překlad argumentů/struktur); D3DCAPS8 karty z doby WC3 (VS 1.1, PS 1.4, 4 textury). Zařízení se vytvoří, hra volá
+  `Present` (zatím bez rendereru na stránce – zahazuje se).
+- `runtime/user32.c`: okna s vlastními procedurami, WM_CREATE/aktivace/WM_SIZE, Send/PostMessage, WM_QUIT, časovače,
+  čekající GetMessage. Hra vytvoří okna „Warcraft III“ (CGxDevice), „BlockingWindow“, „BlizPlay“ (přehrávač videí).
+- `tools/winapi_nargs.txt` (z Wine .spec, `tools/winapi_args.py`): přesné počty argumentů stdcall; `gen.sh ARGS_ONLY=1`.
+- Lifter: kód = `.text` + navazující spustitelné sekce (`code_range`; Mss32 má mixer v `MSSMIXER`).
+
+Chyby nalezené cestou (všechny opraveny):
+- `LoadImageA` odhadnut na 3 argumenty místo 6 → rozhozený zásobník → `this` CGxDevice = NULL.
+- `TlsGetValue` nenuloval LastError → Prop.cpp (Game.dll 0x16d98e0) bral starou chybu jako „žádná tabulka“.
+- DirectShow (videa): `CoCreateInstance` vrací REGDB_E_CLASSNOTREG, `seenintromovie=1` ve výchozím registru (WC3 bez
+  DirectShow nepočítá – přehrávač pak sahá na NULL); `WC3_MOVIES=1` videa vynutí.
+- `RaiseException(0x406D1388)` (pojmenování vlákna) se ignoruje (bez SEH by ukončila proces).
+- Doplněno: `CoInitialize`, `OpenEventA`, `SystemTimeToFileTime`, `GetSystemDefaultUILanguage` (0x405), `GetProfileStringA`,
+  `ImmAssociateContext`.
+
+Stav: hra inicializuje zvuk Miles (DirectSound → Web Audio, vlákno Miles) – další běh ověří MSSMIXER.
+
 **Kde to končilo dřív:** `GameMain` → kontrola produktů (`sub_01009950`: CD klíč v `War3.mpq`/`War3X.mpq` přes Storm
 `#289`) → „Warcraft III was unable to initialize.“ Příčina: hra startuje vlákna (CRT a Stormovo asynchronní čtení
 MPQ `0x0051abd0`), node:wasi `thread-spawn` nemá → čtení se nedokončí. Pod Node dál nepůjde (WASI má fd tabulku po
