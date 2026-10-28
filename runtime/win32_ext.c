@@ -732,6 +732,10 @@ static int wm_pop(uint32_t *m, uint32_t *wp, uint32_t *lp){
     return 1;
 }
 
+/* WC3_MUTEXLOG=1 (debugging): every CreateMutex / ReleaseMutex / wait on a
+ * mutex, with the thread, the handle, its state and the caller */
+void win32_set_last_error(CPU *c, uint32_t e);   /* win32.c */
+static int mutexlog(void){ static int v = -1; if (v < 0){ const char *e = getenv("WC3_MUTEXLOG"); v = e && *e == '1'; } return v; }
 static uint32_t cur_tid(CPU *c){
     return (c && c->fs_base && mem_is_committed(c->fs_base+0x24u))
            ? MR32(c->fs_base+0x24u) : 0u;
@@ -751,6 +755,23 @@ static int mutex_take_now(Obj *o, uint32_t me){
     else if (o->signaled){ o->signaled = 0; o->owner_tid = me; o->rec = 1; got = 1; }
     pthread_mutex_unlock(&o->mtx);
     return got;
+}
+
+/* Ready for thread `me`?  take=1 also acquires it as Windows does on a
+ * successful wait.  Object lock held. */
+static int obj_ready_locked(Obj *o, uint32_t me, int take){
+    if (o->kind == OB_MUTEX){
+        if (o->owner_tid == me && o->rec > 0){ if (take) o->rec++; return 1; }
+        if (!o->signaled) return 0;
+        if (take){ o->signaled = 0; o->owner_tid = me; o->rec = 1; }
+        return 1;
+    }
+    if (o->signaled <= 0) return 0;
+    if (take){
+        if (o->kind == OB_SEM) o->signaled--;
+        else if (o->kind == OB_EVENT && !o->manual) o->signaled = 0;
+    }
+    return 1;
 }
 
 void guest_fair_yield(void){
@@ -925,6 +946,16 @@ static void thread_finish(Obj *o, uint32_t code, CPU *c){
     com_forget_cpu(c);                                /* com.c caches the CPU of the last COM call */
     __sync_fetch_and_add(&g_threads_exited, 1);
     if (!o) return;
+    /* mutexes it still owns are abandoned: Windows frees them for the next
+     * waiter (which gets WAIT_ABANDONED; here a plain success) */
+    if (o->tid) for (int i = 1; i < g_obj_n; i++){
+        Obj *m = &g_obj[i];
+        if (m->kind != OB_MUTEX || m->owner_tid != o->tid) continue;
+        pthread_mutex_lock(&m->mtx);
+        if (m->kind == OB_MUTEX && m->owner_tid == o->tid){
+            fprintf(stderr, "[mutex] 0x%08x abandoned by ending tid %u\n", H_BASE + (uint32_t)i, o->tid);
+            m->owner_tid = 0; m->rec = 0; m->signaled = 1; pthread_cond_broadcast(&m->cv); }
+        pthread_mutex_unlock(&m->mtx); }
     { const char *mn = 0;                               /* threads of a lifted DLL: say so */
       if (module_nearest_fn(o->guest_entry, &mn))
           fprintf(stderr, "[thread] tid=%u (%s, entry 0x%08x) ended, exit code %u\n", o->tid, mn, o->guest_entry, code); }
@@ -1551,6 +1582,8 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
         uint32_t h=obj_new(OB_MUTEX); Obj*o=obj_get(h);
         if(o){ if (A(c,1)){ o->signaled=0; o->owner_tid=cur_tid(c); o->rec=1; }
                else       { o->signaled=1; o->owner_tid=0; o->rec=0; } }
+        if (mutexlog()) fprintf(stderr, "[mutex] CreateMutexA(owner=%u, \"%s\") -> 0x%08x by tid %u from 0x%08x\n", A(c,1),
+                                A(c,2) && mem_is_committed(A(c,2)) ? (const char *)(g_mem + A(c,2)) : "", h, cur_tid(c), c->eip);
         r=h; }
     else if (!strcmp(n,"ReleaseMutex")){
         Obj*o=obj_get(A(c,0)); uint32_t me=cur_tid(c);
@@ -1563,6 +1596,9 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
                        r=1;
                    } else r=0;            /* we are not the owner */
                } else { o->signaled=1; pthread_cond_broadcast(&o->cv); r=1; }
+               if (mutexlog() && o->kind == OB_MUTEX)
+                   fprintf(stderr, "[mutex] ReleaseMutex(0x%08x) by tid %u from 0x%08x -> %u (owner now %u, rec %d, signaled %d)\n",
+                           A(c,0), me, c->eip, r, o->owner_tid, o->rec, o->signaled);
                pthread_mutex_unlock(&o->mtx); }
     }
     else if (!strcmp(n,"CreateSemaphoreA")){ uint32_t h=obj_new(OB_SEM); Obj*o=obj_get(h); if(o) o->signaled=(int)A(c,1); r=h; }
@@ -1629,8 +1665,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
                 if(ts.tv_nsec>=1000000000L){ts.tv_sec++;ts.tv_nsec-=1000000000L;}
                 pthread_cond_timedwait(&o->cv,&o->mtx,&ts);
             }
-            r = o->signaled ? 0u : 0x102u;              /* WAIT_OBJECT_0 / WAIT_TIMEOUT */
-            if(o->signaled && !o->manual) o->signaled=0;
+            r = obj_ready_locked(o, 0, 1) ? 0u : 0x102u; /* WAIT_OBJECT_0 / WAIT_TIMEOUT */
             pthread_mutex_unlock(&o->mtx);
             guest_yield_end();
         } }
@@ -1742,24 +1777,49 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
         guest_yield_end();
         r=0; }
     else if (!strcmp(n,"WaitForMultipleObjects")){
+        /* Polls every 1 ms until ready or the timeout (INFINITE waits for
+         * good: it used to give up after 200 ms).  A mutex it takes gets its
+         * owner, as with WaitForSingleObject; without one the owner's
+         * ReleaseMutex failed and the next waiter hung forever (Mss32's
+         * timer thread vs. the game's main thread).  bWaitAll takes all at
+         * once, under every object's lock. */
         uint32_t cnt=A(c,0), parr=A(c,1), waitall=A(c,2), ms=A(c,3);
-        (void)waitall;
+        uint32_t me = cur_tid(c);
+        if (cnt > 64) cnt = 64;
+        Obj *ob[64]; uint32_t n_ok = 0;
+        for (uint32_t i=0;i<cnt;i++){ ob[i] = parr ? obj_get(MR32(parr+4u*i)) : 0; if (ob[i]) n_ok++; }
         ts_set(TS_WAITM, cnt && parr && mem_is_committed(parr+3) ? MR32(parr) : 0u);
         guest_yield_begin();
-        uint32_t got=0x102u;
-        for (int spin=0; spin<200; spin++){
-            for (uint32_t i=0;i<cnt && i<64;i++){
-                Obj*o=obj_get(MR32(parr+4u*i));
-                if(o){ pthread_mutex_lock(&o->mtx);
-                       int sig=o->signaled;
-                       if(sig && !o->manual) o->signaled=0;
-                       pthread_mutex_unlock(&o->mtx);
-                       if(sig){ got=i; break; } }
+        struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
+        uint32_t got = 0x102u;
+        if (n_ok == cnt && cnt) for (;;){
+            if (waitall){
+                for (uint32_t i=0;i<cnt;i++) pthread_mutex_lock(&ob[i]->mtx);
+                int all = 1;
+                for (uint32_t i=0;i<cnt && all;i++) all = obj_ready_locked(ob[i], me, 0);
+                if (all){ for (uint32_t i=0;i<cnt;i++) obj_ready_locked(ob[i], me, 1); got = 0; }
+                for (uint32_t i=cnt;i-- > 0;) pthread_mutex_unlock(&ob[i]->mtx);
+            } else {
+                for (uint32_t i=0;i<cnt;i++){
+                    pthread_mutex_lock(&ob[i]->mtx);
+                    int ok = obj_ready_locked(ob[i], me, 1);
+                    pthread_mutex_unlock(&ob[i]->mtx);
+                    if (ok){ got = i; break; }
+                }
             }
-            if (got!=0x102u || ms==0) break;
+            if (got != 0x102u || ms == 0) break;
+            if (ms != 0xFFFFFFFFu){
+                struct timespec t1; clock_gettime(CLOCK_MONOTONIC, &t1);
+                int64_t el = (int64_t)(t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+                if (el >= (int64_t)ms) break;
+            }
             struct timespec ts={0,1000000L}; nanosleep(&ts,0);
         }
+        else if (cnt){ win32_set_last_error(c, 6u); got = 0xFFFFFFFFu; }   /* ERROR_INVALID_HANDLE */
         guest_yield_end();
+        if (mutexlog()) for (uint32_t i=0;i<cnt;i++) if (ob[i] && ob[i]->kind == OB_MUTEX)
+            fprintf(stderr, "[mutex] WaitForMultipleObjects(%u, all=%u, %u ms) incl. 0x%08x by tid %u from 0x%08x -> 0x%x\n",
+                    cnt, waitall, ms, MR32(parr+4u*i), me, c->eip, got);
         r=got; }
     else if (!strcmp(n,"SwitchToThread")){ guest_yield_begin(); sched_yield(); guest_yield_end(); r=1; }
     else if (!strcmp(n,"CloseHandle")){ obj_close(A(c,0)); r=1; }
@@ -1770,7 +1830,7 @@ int win32_ext_call(CPU *c, const char *n, uint32_t *out){
     else if (!strcmp(n,"GetLogicalDrives")) r=0x0000000Cu;             /* C: and D: */
     else if (!strcmp(n,"GetDriveTypeA")) r=3;                          /* DRIVE_FIXED */
     else if (!strcmp(n,"GetCurrentDirectoryA")){
-        uint32_t p=A(c,1); const char*s="C:\\NFSU2"; uint32_t l=(uint32_t)strlen(s);
+        uint32_t p=A(c,1); const char*s="C:\\Warcraft III"; uint32_t l=(uint32_t)strlen(s);
         if(p){ mem_commit(p,l+1); memcpy(g_mem+p,s,l); MR8(p+l)=0; } r=l; }
     else if (!strcmp(n,"SetCurrentDirectoryA")) r=1;
     else if (!strcmp(n,"GetLongPathNameA")||!strcmp(n,"GetShortPathNameA")){

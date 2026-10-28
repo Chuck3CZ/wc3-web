@@ -83,7 +83,19 @@ Chyby nalezené cestou (všechny opraveny):
 - Doplněno: `CoInitialize`, `OpenEventA`, `SystemTimeToFileTime`, `GetSystemDefaultUILanguage` (0x405), `GetProfileStringA`,
   `ImmAssociateContext`.
 
-Stav: hra inicializuje zvuk Miles (DirectSound → Web Audio, vlákno Miles) – další běh ověří MSSMIXER.
+- Mutexy: `WaitForMultipleObjects` mutex zabral bez vlastníka (pak `ReleaseMutex` vlastníka selhal → hlavní vlákno
+  viselo na mutexu Mss32 navždy) a INFINITE vzdal po 200 ms; semafory čekání nulovalo místo dekrementu. Teď jedno
+  pravidlo `obj_ready_locked` (mutex s vlastníkem a rekurzí, semafor po jedné, auto-reset událost, vlákno zůstává
+  signalizované), `bWaitAll`, opuštěné mutexy končícího vlákna se uvolní. Ladění `WC3_MUTEXLOG=1`.
+- Lifter: `discover` řezal blok po 4000 instrukcích **bez pokračování** – Game.dll `sub_013d4020` (registrace ~1000
+  JASS nativních funkcí v jednom bloku) skončila bez zbytku a bez `ret` → zásobník o 4 B jinde → destruktor objektu
+  na zásobníku v `sub_01008420` četl cizí data → `SMemFree(1)` → pád ve Stormu. Teď pokračuje novým blokem
+  (fall-through goto). Nalezeno háčky `HOOKS=` s výpisem `esp` za každým voláním (`WC3_HOOKAT=<hex>` vypíše jen
+  jeden háček, `WC3_HOOKBAD=<reg>` jen když registr není platná adresa, `WC3_HOOKDUMP=edi-4` umí i záporný posun).
+- Miles hledá `Mp3dec.asi`/`Mssfast.m3d` v `redist\miles` → loader modulů hledá i tam. `GetCurrentDirectoryA`
+  vrací `C:\Warcraft III` (bylo `C:\NFSU2`).
+
+Stav: hra projde zvukem Miles, prohledá `Maps\` (hlavičky všech map) a načte UI skiny; další běh po opravě lifteru.
 
 **Kde to končilo dřív:** `GameMain` → kontrola produktů (`sub_01009950`: CD klíč v `War3.mpq`/`War3X.mpq` přes Storm
 `#289`) → „Warcraft III was unable to initialize.“ Příčina: hra startuje vlákna (CRT a Stormovo asynchronní čtení

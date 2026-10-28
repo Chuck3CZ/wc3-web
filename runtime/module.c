@@ -238,6 +238,15 @@ static int bind_imports(int i, int *order, int *norder, uint32_t *err){
     return 1;
 }
 
+/* the game folder, then redist\miles (Miles' providers Mp3dec.asi and
+ * Mssfast.m3d, which Mss32 finds there by FindFirstFile) */
+static int resolve_module(const char *name, char *host, size_t hsz){
+    char w[300];
+    if (fileio_resolve_game(name, host, hsz)) return 1;
+    snprintf(w, sizeof w, "redist\\miles\\%s", name);
+    return fileio_resolve_game(w, host, hsz);
+}
+
 /* map + bind module i and the lifted modules it imports; order[] gets the
  * newly mapped ones in post order (dependencies first) for their DllMain */
 static int load_tree(int i, int *order, int *norder, uint32_t *err){
@@ -245,7 +254,7 @@ static int load_tree(int i, int *order, int *norder, uint32_t *err){
     const ModInfo *mi = g_modtab[i].info;
     char host[1024];
     if (i == g_exe && g_st[i].path[0]) snprintf(host, sizeof host, "%s", g_st[i].path);
-    else if (!fileio_resolve_game(mi->name, host, sizeof host)){
+    else if (!resolve_module(mi->name, host, sizeof host)){
         fprintf(stderr, "[module] %s: not found in the game folder\n", mi->name);
         *err = 126u; return 0;                                   /* ERROR_MOD_NOT_FOUND */
     }

@@ -88,6 +88,14 @@ static const struct { uint32_t ip; const char *what; } g_hook_names[] = {
 void guest_hook(CPU *c, uint32_t ip){
     static int max = -1; static uint64_t n = 0;
     g_hook_hits++;
+    /* WC3_HOOKAT=<hex>: print only that hook (the others still count) */
+    static long at = -2; if (at == -2){ const char *e = getenv("WC3_HOOKAT"); at = e && *e ? (long)strtoul(e, 0, 16) : -1; }
+    if (at >= 0 && ip != (uint32_t)at) return;
+    /* WC3_HOOKBAD=<reg>: print only when that register is not a committed address */
+    static int bad = -2; if (bad == -2){ const char *e = getenv("WC3_HOOKBAD"); static const char *const rn[8] = { "eax","ecx","edx","ebx","esp","ebp","esi","edi" };
+        bad = -1; for (int k = 0; e && k < 8; k++) if (!strncmp(e, rn[k], 3)) bad = k; }
+    if (bad >= 0 && c->r[bad] && mem_is_committed(c->r[bad])) return;
+    if (bad >= 0){ fprintf(stderr, "[hook] bad %s at %08x, caller %08x:", "reg", ip, mem_is_committed(c->esp+12) ? MR32(c->esp+12) : 0); }
     if (max < 0){ const char *e = getenv("WC3_HOOKMAX"); max = e && *e ? atoi(e) : 20; }
     if (n++ >= (uint64_t)max) return;
     fprintf(stderr, "[hook] %08x  eax=%08x ecx=%08x edx=%08x ebx=%08x esp=%08x ebp=%08x esi=%08x edi=%08x\n",
@@ -99,7 +107,7 @@ void guest_hook(CPU *c, uint32_t ip){
         static const char *const rn[8] = { "eax","ecx","edx","ebx","esp","ebp","esi","edi" };
         int r = -1; for (int k = 0; k < 8; k++) if (!strncmp(t, rn[k], 3)) r = k;
         if (r < 0) continue;
-        uint32_t a = c->r[r] + (uint32_t)strtoul(t + 4, 0, 0);
+        uint32_t a = c->r[r] + (uint32_t)strtol(t + 3, 0, 0);     /* "edi-4", "esp+20" */
         if (!mem_is_committed(a)){ fprintf(stderr, "[hook]   [%s] = %08x: not committed\n", t, a); continue; }
         uint32_t v = MR32(a);
         fprintf(stderr, "[hook]   [%s] @%08x = %08x", t, a, v);

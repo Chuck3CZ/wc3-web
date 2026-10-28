@@ -574,7 +574,13 @@ class Lifter:
                         continue
                     if m in ('hlt','ud2'): break
                     va=i.address+i.size
-                    if len(ins)>maxins: break
+                    if len(ins)>maxins:
+                        # a long straight run (Game.dll registers its ~1,300
+                        # JASS natives in one block) continues in a new block,
+                        # reached by the fall-through goto; it used to end
+                        # here, without the rest or the ret
+                        if va not in seen: seen.add(va); q.append(va)
+                        break
                 blocks[ins[0].address if ins else va]=ins
                 if jt and ins:
                     b = self._jt_bound(ins)
