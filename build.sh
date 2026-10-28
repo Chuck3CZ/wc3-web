@@ -25,7 +25,7 @@ CFLAGS="$TARGET $OPT $FEAT $DEFS -fno-delete-null-pointer-checks -include runtim
 SHARDFLAGS="-DNFSU2_GUEST_OBJ -Wno-unused-label -Wno-parentheses-equality"
 CACHE="${OBJCACHE:-$HOME/.cache/wc3-web/obj}"; mkdir -p "$CACHE"
 HDRSUM="$( (cat runtime/cpu.h runtime/module.h runtime/web/compat/wasm_plat.h; "$CC" --version | head -1; echo "$CFLAGS $SHARDFLAGS") | sha256sum | cut -c1-16)"
-LIFTER="lifter $(cat tools/lift.py tools/lregs.py tools/genall.py tools/argcount.py tools/prepare_module.py tools/ptrscan.py | sha256sum | cut -c1-16)"
+LIFTER="lifter $(cat tools/lift.py tools/lregs.py tools/genall.py tools/prepare_module.py tools/ptrscan.py | sha256sum | cut -c1-16)"
 
 MODS="$*"; LINK=0
 [ -n "$MODS" ] || { MODS="$(ls -d gen/*/ 2>/dev/null | xargs -n1 basename | tr '\n' ' ')"; LINK=1; }
@@ -67,7 +67,7 @@ done
 # runtime still calls (widescreen, enhancements, frame pacer, DirectInput,
 # D3DX, ...), as headers and neutral stand-ins; docs/PLAN.md lists what is
 # left to take out.
-RT="mem dispatch genexec heap watchdog win32 win32_ext com debug res fileio vsemu oracle lifecycle keyboard winsock module nfsu2_compat/stubs"
+RT="mem dispatch genexec heap watchdog win32 win32_ext com debug res fileio vsemu oracle lifecycle keyboard winsock module d3d8 user32 nfsu2_compat/stubs"
 RTFLAGS="$CFLAGS -Iruntime/nfsu2_compat"
 WEB="$(cd runtime/web && ls *.c | sed 's/\.c$//')"
 mkdir -p out/web/rt; rm -f out/web/rt/*.o

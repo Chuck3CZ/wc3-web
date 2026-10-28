@@ -720,9 +720,11 @@ static int timer_due(uint32_t *hwnd, uint32_t *id, uint32_t *proc, int remove){
     return 0;
 }
 /* autotest.c: synthetic WM_KEYDOWN/WM_KEYUP/WM_CHAR */
-void win32_post_message(uint32_t m, uint32_t wp, uint32_t lp){ wm_push(m, wp, lp); }
+/* WC3: the host's input goes to user32.c's queue (the focus window) */
+void user32_post_input(uint32_t m, uint32_t wp, uint32_t lp); int user32_room(void);
+void win32_post_message(uint32_t m, uint32_t wp, uint32_t lp){ user32_post_input(m, wp, lp); (void)wm_push; }
 /* free entries in the queue (keyboard.c moves host messages in up to that) */
-int win32_msg_room(void){ return (g_wmq_head - g_wmq_tail - 1 + WMQ) % WMQ; }
+int win32_msg_room(void){ return user32_room(); }
 static int wm_pop(uint32_t *m, uint32_t *wp, uint32_t *lp){
     if (g_wmq_head == g_wmq_tail) return 0;
     *m = g_wmq[g_wmq_head].msg; *wp = g_wmq[g_wmq_head].wp; *lp = g_wmq[g_wmq_head].lp;

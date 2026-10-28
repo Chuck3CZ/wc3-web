@@ -180,6 +180,24 @@ KNOWN={
  'inet_ntoa':1,'gethostbyname':1,'gethostname':2,'WSAGetLastError':0,'getsockname':3,
  'GetFileTime':4,
 }
+# tools/winapi_nargs.txt (tools/winapi_args.py, from Wine's .spec files): the
+# real stdcall counts of the system DLLs.  Order: KNOWN (checked by hand),
+# then this table, then the guess from the push sequences, which is only right
+# for 82-89 % of WC3's imports (LoadImageA: guessed 3, really 6).
+WINAPI = {}
+_wt = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'winapi_nargs.txt')
+if os.path.exists(_wt):
+    for _ln in open(_wt):
+        _p = _ln.split()
+        if len(_p) == 3: WINAPI[(_p[0], _p[1])] = int(_p[2])
+def table_nargs(dll, nm):
+    d = dll.lower()
+    if not d.endswith('.dll'): d += '.dll'
+    for k in ((d, nm), ('kernelbase.dll', nm) if d == 'kernel32.dll' else None, ('ntdll.dll', nm) if d == 'kernel32.dll' else None,
+              ('ws2_32.dll', nm) if d == 'wsock32.dll' else None):
+        if k and k in WINAPI: return WINAPI[k]
+    return None
+LIFTED_DLLS = {'storm.dll', 'mss32.dll', 'msvcr80.dll', 'ijl15.dll', 'game.dll'}   # bound to lifted code: no HLE count
 hit=miss=0; rows=[]
 for a,(dll,nm) in iat.items():
     cnt=argv.get(a)
@@ -196,8 +214,17 @@ if STRICT:
 with open(IMPOUT,'w') as f:
     f.write('#include <stdint.h>\ntypedef struct { uint32_t iat; const char*dll; const char*name; int nargs; } ImpEnt;\n')
     f.write(f'const uint32_t g_{SYMPFX}imp_count = {len(rows)};\nconst ImpEnt g_{SYMPFX}imp[] = {{\n')
+    src = {'known': 0, 'table': 0, 'guess': 0}; guessed = []
     for dll,nm,n,sites,a in sorted(rows,key=lambda r:r[4]):
-        n2 = KNOWN.get(nm, n)
+        t = table_nargs(dll, nm)
+        if nm in KNOWN: n2 = KNOWN[nm]; src['known'] += 1
+        elif t is not None: n2 = t; src['table'] += 1
+        else:
+            n2 = n; src['guess'] += 1
+            if dll.lower() not in LIFTED_DLLS: guessed.append(f'{dll}!{nm}={n}')
+        if t is not None and nm in KNOWN and KNOWN[nm] != t:
+            print(f"  NOTE {nm}: KNOWN {KNOWN[nm]}, Wine's spec {t}")
         f.write(f'  {{0x{a:08x}u,"{dll}","{nm}",{n2}}},\n')
     f.write('};\n')
-print(f"-> {IMPOUT} ({len(rows)} entries)")
+print(f"-> {IMPOUT} ({len(rows)} entries: {src['known']} hand-checked, {src['table']} from Wine's specs, {src['guess']} guessed)")
+if guessed: print("  GUESSED system imports (not in tools/winapi_nargs.txt): " + ", ".join(guessed))

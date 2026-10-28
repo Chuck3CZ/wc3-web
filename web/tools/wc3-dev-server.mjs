@@ -8,6 +8,7 @@
 //   /data-manifest                       every file of the game folder (the I/O worker's
 //                                        manifest without "blocks": it reads byte ranges)
 //   /data/<path>                         the game folder's files, with Range
+//   POST /log                            the test page's log -> out/browser.log
 // with the headers that make the page cross-origin isolated (SharedArrayBuffer).
 // Port 8086: 8080 is the QNAP's admin page (docs/PLAN.md).
 import http from 'node:http';
@@ -70,6 +71,17 @@ function sendFile(req, res, full, type) {
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = decodeURIComponent(url.pathname);
+  // the test page's log (hostcheck.ts ?logpost): out/browser.log, started over by a new run
+  if (req.method === 'POST' && p === '/log') {
+    let body = ''; req.setEncoding('utf8');
+    req.on('data', d => { body += d; if (body.length > 8e6) req.destroy(); });
+    req.on('end', () => {
+      const f = path.join(ROOT, 'out', 'browser.log');
+      if (body.startsWith('@@start')) fs.writeFileSync(f, body); else fs.appendFileSync(f, body);
+      res.writeHead(204, ISOLATION).end();
+    });
+    return;
+  }
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, ISOLATION).end(); return; }
   if (p === '/data-manifest') { res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json' }).end(MANIFEST); return; }
   if (p.startsWith('/data/')) { const f = inside(DATA, p.slice(6)); return f ? sendFile(req, res, f) : res.writeHead(403, ISOLATION).end(); }

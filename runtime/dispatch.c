@@ -149,8 +149,13 @@ void dispatch_indirect(CPU *c, uint32_t addr){
      * diagnosis below. */
     { static int gx = -1;
       if (gx < 0){ const char *e = getenv("GENEXEC"); gx = (e && *e=='0') ? 0 : 1; }
-      if (gx && mem_is_committed(addr) && run_generated(c, addr)){
-          g_stat_indirect_ok++; return;
+      if (gx && mem_is_committed(addr)){
+          uint32_t ret0 = MR32(c->esp);
+          if (run_generated(c, addr)){
+              static int said;
+              if (said++ < 16) fprintf(stderr, "[genexec] ran generated code at 0x%08x (called from 0x%08x)\n", addr, ret0);
+              g_stat_indirect_ok++; return;
+          }
       } }
 
     g_stat_indirect_miss++;

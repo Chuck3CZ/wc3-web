@@ -4,7 +4,7 @@
 #include <time.h>
 #include <stdatomic.h>
 #include "cpu.h"
-#include "d3d9_tables.h"
+#include "d3d8_tables.h"   /* + d3d9_tables.h */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -163,10 +163,23 @@ static const Iface g_if[] = {
     {"IDirectSound",             M_DS,         NEL(M_DS)},
     {"IDirectSoundBuffer",       M_DSBUF,      NEL(M_DSBUF)},
     {"IDirectInputEffect",       M_DIEFF,      NEL(M_DIEFF)},
+    /* Direct3D 8 (WC3): the same objects with D3D8 vtables, runtime/d3d8.c */
+    {"IDirect3D8",               M_D3D8,       NEL(M_D3D8)},
+    {"IDirect3DDevice8",         M_DEVICE8,    NEL(M_DEVICE8)},
+    {"IDirect3DTexture8",        M_TEXTURE8,   NEL(M_TEXTURE8)},
+    {"IDirect3DCubeTexture8",    M_CUBE8,      NEL(M_CUBE8)},
+    {"IDirect3DVertexBuffer8",   M_VBUF8,      NEL(M_VBUF8)},
+    {"IDirect3DIndexBuffer8",    M_IBUF8,      NEL(M_IBUF8)},
+    {"IDirect3DSurface8",        M_SURFACE8,   NEL(M_SURFACE8)},
 };
+/* keep in step with runtime/d3d8.c */
 enum { IF_D3D9=1, IF_DEV, IF_TEX, IF_VB, IF_IB, IF_SURF, IF_SIMPLE,
        IF_VSHADER, IF_VDECL, IF_STATEBLOCK, IF_SWAPCHAIN, IF_QUERY,
-       IF_DI8, IF_DIDEV, IF_DS, IF_DSBUF, IF_DIEFF };
+       IF_DI8, IF_DIDEV, IF_DS, IF_DSBUF, IF_DIEFF,
+       IF_D3D8, IF_DEV8, IF_TEX8, IF_CUBE8, IF_VB8, IF_IB8, IF_SURF8 };
+/* the D3D9 interface whose object a D3D8 vtable fronts */
+static const uint8_t g_base9[] = { [IF_D3D8] = IF_D3D9, [IF_DEV8] = IF_DEV, [IF_TEX8] = IF_TEX, [IF_CUBE8] = IF_TEX,
+                                   [IF_VB8] = IF_VB, [IF_IB8] = IF_IB, [IF_SURF8] = IF_SURF };
 
 static uint64_t g_com_new_n[NEL(g_if)];   /* per interface: objects created */
 static uint64_t g_com_del_n[NEL(g_if)];   /* ... and destroyed (last Release) */
@@ -793,7 +806,35 @@ static uint64_t g_child_uncached = 0;
 static int com_valid(uint32_t o){
     if (!o || (o & 15u) || !mem_is_committed(o - 16u) || !mem_is_committed(o + 3u)) return 0;
     uint32_t i = CH_IFACE(o) & 0xFFFFu;
-    return i > 0 && i < NEL(g_if) && g_vtab[i] && MR32(o) == g_vtab[i];
+    if (!(i > 0 && i < NEL(g_if))) return 0;
+    uint32_t v = MR32(o);
+    if (g_vtab[i] && v == g_vtab[i]) return 1;
+    for (uint32_t k = IF_D3D8; k < NEL(g_if); k++)          /* handed to D3D8 code: its D3D8 vtable */
+        if (g_base9[k] == i && g_vtab[k] && v == g_vtab[k]) return 1;
+    return 0;
+}
+/* ---- for runtime/d3d8.c ---- */
+uint32_t com_vtab_for(uint32_t iface){
+    if (!iface || iface >= NEL(g_if)) return 0;
+    if (!g_vtab[iface]){
+        unsigned n = g_if[iface].n; uint32_t vt = com_alloc(n*4u);
+        for (unsigned i=0;i<n;i++) MR32(vt+4u*i) = COM_MAGIC | (iface<<16) | i;
+        g_vtab[iface] = vt;
+    }
+    return g_vtab[iface];
+}
+uint32_t com_obj_iface(uint32_t o){ return com_valid(o) ? (CH_IFACE(o) & 0xFFFFu) : 0u; }
+int com_obj_is_cube(uint32_t o){ return com_valid(o) && (CH_FLAGS(o) & CF_CUBE) != 0; }
+int com_method_index(uint32_t iface, const char *name, int *nargs){
+    if (!iface || iface >= NEL(g_if)) return -1;
+    for (unsigned i = 0; i < g_if[iface].n; i++)
+        if (!strcmp(g_if[iface].m[i].name, name)){ if (nargs) *nargs = g_if[iface].m[i].nargs; return (int)i; }
+    return -1;
+}
+const char *com_method_name(uint32_t iface, uint32_t m, int *nargs){
+    if (!iface || iface >= NEL(g_if) || m >= g_if[iface].n) return 0;
+    if (nargs) *nargs = g_if[iface].m[m].nargs;
+    return g_if[iface].m[m].name;
 }
 static uint32_t com_addref(uint32_t o){
     if (!com_valid(o)) return 1;
@@ -2234,8 +2275,10 @@ static void fxtr_dev(CPU *c, int iface, int mid, int nargs, const char *nm){
     fprintf(stderr, "\n");
 }
 
+int d3d8_call(CPU *c, uint32_t iface, uint32_t m);   /* runtime/d3d8.c */
 int com_call(CPU *c, uint32_t magic){
     uint32_t iface=(magic>>16)&0x1FFFu, m=magic&0xFFFFu;
+    if (iface >= IF_D3D8 && iface < NEL(g_if)) return d3d8_call(c, iface, m);
     g_com_calls++;
     g_com_cpu = c;
     if (!g_sb_replay) POP32(c->eip);
@@ -4649,6 +4692,7 @@ void draw_stats_save(uint64_t *a, uint64_t *b){ g_ptype=a; g_stride=b; }
 
 void com_report(void){
     fprintf(stderr,"\n=== COM / D3D9 LAYER ===\n");
+    { void d3d8_report(void); d3d8_report(); }
     ws_report();
 #ifdef __wasm__
     { void headlights_report(void); headlights_report(); }

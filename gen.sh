@@ -39,7 +39,7 @@ WANT=" $* "
 
 export X87PC="${X87PC:-1}" X87OPT="${X87OPT:-1}" JTSWITCH="${JTSWITCH:-1}" LREGS="${LREGS:-1}"
 h16(){ sha256sum | cut -c1-16; }
-SOURCES="lifter $(cat tools/lift.py tools/lregs.py tools/genall.py tools/argcount.py tools/prepare_module.py tools/ptrscan.py | h16)"
+SOURCES="lifter $(cat tools/lift.py tools/lregs.py tools/genall.py tools/prepare_module.py tools/ptrscan.py | h16)"
 
 # find a file case-insensitively in the game folder (Mss32.dll vs mss32.dll)
 ifind(){ find "$W" -maxdepth 3 -ipath "$W/$1" -type f | head -1; }
@@ -53,6 +53,17 @@ echo "$MODULES" | while read -r MOD FILE BASE PFX NSH SHA; do
   [ "$GOT" = "$SHA" ] || { echo "gen.sh: $FILE is not the 1.26a file (sha256 $GOT, want $SHA)"; exit 1; }
   NV="NSHARD_${MOD^^}"; NSH="${!NV:-$NSH}"
   G="gen/$MOD"; O="out/mod/$MOD"
+  if [ "${ARGS_ONLY:-}" = 1 ]; then
+    # only the import table (argument counts: tools/argcount.py, tools/winapi_nargs.txt);
+    # the lifted shards stay, and the stamp keeps naming the lifter they were made by
+    [ -f "$G/stamp.txt" ] && ! grep -q '^incomplete' "$G/stamp.txt" || { echo "gen.sh: $MOD was never lifted (run ./gen.sh without ARGS_ONLY)"; exit 1; }
+    IMG="$O/image.dll"; IMPD="$SRC"; [ "$MOD" = war3 ] && { IMG="$SRC"; IMPD=""; }
+    RELOCS="$O/relocs.txt" IMPOUT="$G/impargs.c" SYMPFX="$PFX" IMPDLL="$IMPD" \
+      "$PY" tools/argcount.py "$IMG" > "$O/argcount.log" 2>&1 || { tail -20 "$O/argcount.log"; echo "gen.sh: argcount.py failed for $MOD"; exit 1; }
+    grep -E '^-> |GUESSED' "$O/argcount.log" | sed "s/^/  $MOD: /"
+    sed -i "s/^lifter .*/$SOURCES/" "$G/stamp.txt"   # the import tables are not part of the lift
+    continue
+  fi
   mkdir -p "$G" "$O"; find "$G" -mindepth 1 -delete
   echo "incomplete: gen.sh has not finished (or failed)" > "$G/stamp.txt"
   T0=$(date +%s)

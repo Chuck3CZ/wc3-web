@@ -68,6 +68,7 @@ static int system_dll(const char *nm){
 void mem_commit(uint32_t,uint32_t);
 void guest_backtrace(CPU*,int);
 int win32_ext_call(CPU*, const char*, uint32_t*);
+int user32_call(CPU*, const char*, uint32_t*);
 void guest_fair_yield(void);
 int fileio_call(CPU*, const char*, uint32_t*);
 void fileio_report(void);
@@ -599,6 +600,7 @@ int win32_call(CPU *c, uint32_t idx){
                 cap?(char*)(g_mem+cap):"(none)", txt?(char*)(g_mem+txt):"(none)");
         r = 1; }
     else if (!strcmp(n,"Direct3DCreate9")) r = com_direct3dcreate9();
+    else if (!strcmp(n,"Direct3DCreate8")){ uint32_t d3d8_create(void); r = d3d8_create(); }
     else if (!strcmp(n,"DirectInput8Create")) r = com_directinput8create(ARG(c,3));
     else if (!strcmp(n,"DirectSoundCreate") || (!strcmp(n,"#1") && !strcasecmp(e->dll,"DSOUND.dll")))
         r = com_directsoundcreate(ARG(c,1));
@@ -619,6 +621,7 @@ int win32_call(CPU *c, uint32_t idx){
         if(g_exit_armed) longjmp(g_exit_jmp,1); return -1; }
     else if (winsock_call(c, e->dll, n, &r)) { /* ws2_32, netapi32: winsock.c */ }
     else if (fileio_call(c, n, &r)) { /* file I/O */ }
+    else if (user32_call(c, n, &r)) { /* windows and messages: user32.c */ }
     else if (win32_ext_call(c, n, &r)) { /* second-round layer */ }
     else { handled = 0; g_win32_unimpl++; stat_[idx].unimpl++;
 

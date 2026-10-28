@@ -28,6 +28,7 @@ void   ws_report(void){ }
  * WC3 gets a pacer of its own later (docs/PLAN.md). */
 int  hfr_mode_off(void){ return 1; }
 int  hfr_mailbox(void){ return 0; }
+int  hfr_display_live(void){ return 1; }          /* the page draws: sleeps may spin at their end (win32_ext.c) */
 void hfr_note_vsync(double ts, double dur){ (void)ts; (void)dur; }
 
 /* headlights.c: NFSU2's other cars' headlights on the road */

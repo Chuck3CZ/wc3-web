@@ -4,7 +4,14 @@ import { startProcess } from '../host/process';
 import { attachNet } from '../net/index';
 const q = new URLSearchParams(location.search);
 const pre = document.createElement('pre'); document.body.append(pre);
-const log = (s: string) => { pre.append(s + '\n'); console.log(s); };
+// ?logpost: the log also goes to the server (POST /log, web/tools/wc3-dev-server.mjs keeps it in
+// out/browser.log), so a run can be read without copying it from the page
+const posting = q.has('logpost');
+let outq: string[] = ['@@start ' + new Date().toISOString() + ' ' + location.search];
+const flush = () => { if (!posting || !outq.length) return; const body = outq.join('\n') + '\n'; outq = [];
+  fetch('/log', { method: 'POST', body, keepalive: true }).catch(() => {}); };
+if (posting) setInterval(flush, 500);
+const log = (s: string) => { pre.append(s + '\n'); console.log(s); if (posting) outq.push(s); };
 const t0 = performance.now();
 const mod = await WebAssembly.compileStreaming(fetch(q.get('wasm') ?? '/test/hostcheck.wasm'));
 log(`compiled in ${(performance.now() - t0).toFixed(0)} ms`);
@@ -42,4 +49,4 @@ const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log, onN
 (globalThis as any).nfsu2Net = net;
 const code = await p.exited;
 if (net) log(`NET ${JSON.stringify(net.stats())}`);
-log(`EXIT ${code}`); document.title = 'DONE';
+log(`EXIT ${code}`); flush(); document.title = 'DONE';
