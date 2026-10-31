@@ -148,8 +148,15 @@ WEAK void metal_set_ui_aspect(float ax, float ay){ (void)ax; (void)ay; }
 WEAK void metal_set_zsurf(unsigned z){ (void)z; }
 WEAK void metal_z_forget(unsigned z){ (void)z; }
 /* sizes: the page's canvas in device pixels (NFSU2_WIDTH/HEIGHT), else 1280x720 */
-WEAK void metal_game_size(unsigned *w, unsigned *h){ if (w) *w = g_game_w; if (h) *h = g_game_h; }
-WEAK void metal_set_game_size(unsigned w, unsigned h){ if (w && h && w <= 8192 && h <= 8192){ g_game_w = w; g_game_h = h; } }
+/* WC3_WIDTH/WC3_HEIGHT (the test page: the screen's size): the window the game opens, its client area and so its
+ * back buffer (com.c CreateDevice, windowed 0x0); without them 1280x720 */
+static void game_size_env(void){
+    static int done; if (done) return; done = 1;
+    unsigned w = (unsigned)env_u("WC3_WIDTH", 0), h = (unsigned)env_u("WC3_HEIGHT", 0);
+    if (w >= 640 && h >= 480 && w <= 8192 && h <= 8192){ g_game_w = w & ~1u; g_game_h = h & ~1u; }
+}
+WEAK void metal_game_size(unsigned *w, unsigned *h){ game_size_env(); if (w) *w = g_game_w; if (h) *h = g_game_h; }
+WEAK void metal_set_game_size(unsigned w, unsigned h){ game_size_env(); if (w && h && w <= 8192 && h <= 8192){ g_game_w = w; g_game_h = h; } }
 WEAK void metal_want_size(unsigned w, unsigned h){ (void)w; (void)h; }
 WEAK void metal_resize(unsigned w, unsigned h){ (void)w; (void)h; }
 WEAK void metal_view_size(unsigned *ow, unsigned *oh){ *ow = (unsigned)env_u("NFSU2_WIDTH", 1280) & ~1u; *oh = (unsigned)env_u("NFSU2_HEIGHT", 720) & ~1u; }

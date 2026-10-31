@@ -27,6 +27,9 @@
 //        page reactivate it; requestQuit() is WM_CLOSE.  Fullscreen locks the
 //        keyboard (navigator.keyboard.lock) so Escape and the browser's
 //        reserved shortcuts reach the game; holding Escape leaves fullscreen.
+//        With pointerLock it also locks the mouse to the element: the OS
+//        cursor cannot leave for another screen, and the cursor moves by the
+//        mouse's movement from where it was.
 // Use:   lastInput() is when the player last pressed a key, moved or clicked
 //        the mouse anywhere on the page, pressed a controller button or moved
 //        a stick or trigger (the app's away check, away.ts).
@@ -51,6 +54,8 @@ export interface InputOptions {
   /** the game image inside the element, CSS px relative to its border box (default: all of it) */
   viewRect?: () => ViewRect;
   hideCursor?: boolean;              // default true
+  /** in fullscreen, lock the mouse to the element (Pointer Lock): positions from its movement (default false) */
+  pointerLock?: boolean;
   gamepads?: boolean;                // default true
   /** where key events are listened for (default window, capture phase) */
   keyboardTarget?: EventTarget;
@@ -227,11 +232,28 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
 
   // ---- mouse -------------------------------------------------------------------
   let buttons = 0, wheelAcc = 0;
+  // the last position sent (65536 = the image's width or height): under pointer lock the movement starts from it
+  let mx = 32768, my = 32768;
+  const locked = () => document.pointerLockElement === element;
   function pos(e: MouseEvent): [number, number] {
     const rc = element.getBoundingClientRect();
     const v = opts.viewRect?.() ?? { x: 0, y: 0, w: rc.width, h: rc.height };
+    if (locked() && (e as PointerEvent).pointerType !== 'touch') {
+      const clamp = (n: number) => Math.min(65535, Math.max(0, Math.round(n)));
+      mx = clamp(mx + e.movementX / Math.max(1, v.w) * 65536); my = clamp(my + e.movementY / Math.max(1, v.h) * 65536);
+      return [mx, my];
+    }
     const x = (e.clientX - rc.left - v.x) / Math.max(1, v.w), y = (e.clientY - rc.top - v.y) / Math.max(1, v.h);
-    return [Math.round(x * 65536), Math.round(y * 65536)];
+    mx = Math.round(x * 65536); my = Math.round(y * 65536);
+    return [mx, my];
+  }
+  // a pointer lock is asked for in fullscreen only, from the fullscreen request or a click (a user gesture either way)
+  function lockPointer() {
+    if (!opts.pointerLock || detached || document.fullscreenElement !== element || locked()) return;
+    try {
+      const r = (element.requestPointerLock as () => Promise<void> | void)();
+      if (r instanceof Promise) r.catch(e => log(`[input] pointer lock refused: ${e}`));
+    } catch (e) { log(`[input] pointer lock refused: ${e}`); }
   }
   function syncButtons(e: PointerEvent | MouseEvent) {
     // DOM buttons mask: 1 left, 2 right, 4 middle, 8 back, 16 forward = DirectInput's 0, 1, 2, 3, 4
@@ -252,7 +274,8 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
   function onPointerDown(e: PointerEvent) {
     if (detached) return;
     if (e.pointerType === 'touch') { onFingerDown(e); return; }
-    try { element.setPointerCapture(e.pointerId); } catch { /* a synthetic pointer */ }
+    if (!locked()) try { element.setPointerCapture(e.pointerId); } catch { /* a synthetic pointer */ }
+    lockPointer();
     const [x, y] = pos(e);
     push(IEV_MOUSE_MOVE, 0, 0, flagsOf(e), [], x, y);
     syncButtons(e);
@@ -413,6 +436,7 @@ export function attachInput(proc: GameProcess, element: HTMLElement, opts: Input
         // all keys: Escape and the browser's reserved shortcuts (Ctrl+W, Alt+Tab ...)
         // reach the game; holding Escape leaves fullscreen
         try { await keyboardApi()?.lock?.(); } catch (e) { log(`[input] keyboard lock refused: ${e}`); }
+        lockPointer();
         return true;
       } catch (e) { log(`[input] fullscreen refused: ${e}`); return false; }
     },

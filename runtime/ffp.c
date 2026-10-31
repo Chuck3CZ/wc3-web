@@ -49,6 +49,12 @@ static float g_rtw = 1280, g_rth = 720;   /* the render target's size (com.c Set
 /* the renderer draws to the whole target: D3D's viewport (the unit portrait's
  * box, ...) is applied here, clip space of the viewport -> of the target */
 void ffp_set_target_size(unsigned w, unsigned h){ if (w && h){ g_rtw = (float)w; g_rth = (float)h; } }
+/* a new device: its viewport is the whole back buffer, as Direct3D sets it */
+void ffp_device_size(unsigned w, unsigned h){
+    if (!w || !h) return;
+    ffp_set_target_size(w, h);
+    g_vp[0] = g_vp[1] = 0.f; g_vp[2] = (float)w; g_vp[3] = (float)h; g_vp[4] = 0.f; g_vp[5] = 1.f;
+}
 int ffp_viewport_rect(int *r){
     if (g_vp[0] == 0.f && g_vp[1] == 0.f && g_vp[2] >= g_rtw && g_vp[3] >= g_rth) return 0;
     r[0] = (int)g_vp[0]; r[1] = (int)g_vp[1]; r[2] = (int)(g_vp[0] + g_vp[2]); r[3] = (int)(g_vp[1] + g_vp[3]);

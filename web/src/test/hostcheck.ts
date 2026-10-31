@@ -7,14 +7,27 @@ import { attachInput } from '../input/index';
 import { attachAudio } from '../audio/index';
 const q = new URLSearchParams(location.search);
 const gpu = q.has('gpu');
+// the game's window size (WC3_WIDTH/HEIGHT, runtime/web/null_platform.c), its picture's resolution: ?res=WxH,
+// by default the screen's (CSS pixels, so a fullscreen picture is not scaled; device pixels cost the GPU too much)
+const resQ = /^(\d{3,4})x(\d{3,4})$/.exec(q.get('res') ?? '');
+const resW = (resQ ? +resQ[1] : Math.max(1280, screen.width)) & ~1, resH = (resQ ? +resQ[2] : Math.max(720, screen.height)) & ~1;
 const canvas = document.createElement('canvas');
-if (gpu) { canvas.width = 1280; canvas.height = 720; canvas.style.cssText = 'display:block;width:1280px;max-width:100%;background:#000';
+const fs = document.createElement('button');
+if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'display:block;width:1280px;max-width:100%;background:#000';
            document.body.append(canvas);
-           const fs = document.createElement('button'); fs.textContent = 'Celá obrazovka'; fs.style.cssText = 'margin:6px 0;font-size:14px';
+           fs.textContent = 'Celá obrazovka'; fs.style.cssText = 'margin:6px 0;font-size:14px';
            fs.onclick = () => { canvas.requestFullscreen({ navigationUI: 'hide' }).then(() => canvas.focus(), e => console.log('fullscreen: ' + e)); };
-           document.body.append(fs); }
-const pre = document.createElement('pre'); document.body.append(pre);
-if (gpu) pre.style.cssText = 'max-height:30vh;overflow:auto;font-size:11px';
+           const hint = document.createElement('span'); hint.style.cssText = 'margin-left:10px;font:13px system-ui,sans-serif;color:#666';
+           hint.textContent = `${resW}×${resH} (?res=ŠxV). Celou obrazovku opustíš podržením Esc.`;
+           document.body.append(fs, hint); }
+const pre = document.createElement('pre');
+if (gpu) {
+  // the log folded away under the game, opened by a click
+  const box = document.createElement('details'), sum = document.createElement('summary');
+  sum.textContent = 'Log'; sum.style.cssText = 'cursor:pointer;font:13px system-ui,sans-serif;margin:4px 0';
+  pre.style.cssText = 'max-height:40vh;overflow:auto;font-size:11px;margin:0';
+  box.append(sum, pre); document.body.append(box);
+} else document.body.append(pre);
 // ?logpost: the log also goes to the server (POST /log, web/tools/wc3-dev-server.mjs keeps it in
 // out/browser.log), so a run can be read without copying it from the page
 const posting = q.has('logpost');
@@ -41,7 +54,7 @@ const env0: Record<string, string> = {};
 if (q.get('reg')) { await preload(q.get('reg')!, 'registry.txt'); env0.NFSU2_REGFILE = '/save/registry.txt'; }
 // ?script=/tests/scripts/x.txt: an autotest input script, copied into the save dir
 const env: Record<string, string> = env0;
-if (gpu) env.NFSU2_RENDERER = 'webgpu';
+if (gpu) { env.NFSU2_RENDERER = 'webgpu'; env.WC3_WIDTH = String(resW); env.WC3_HEIGHT = String(resH); }
 const script = q.get('script');
 if (script) {
   const txt = await (await fetch(script, { cache: 'no-store' })).text();
@@ -61,10 +74,13 @@ if (gpu) {
     const r = await attachRenderer(p, canvas, { log });
     log('[page] WebGPU renderer attached');
     // mouse and keyboard over the picture (imageRect is in canvas pixels; the input wants CSS px)
-    const inp = attachInput(p, canvas, { log, hideCursor: false, viewRect: () => {
+    // the OS cursor hidden over the game (the game draws its own; both together looked like a lagging mouse), and
+    // in fullscreen the keyboard (Escape goes to the game; holding it leaves) and the mouse locked to the game
+    const inp = attachInput(p, canvas, { log, pointerLock: true, viewRect: () => {
       const ir = r.imageRect(), k = canvas.clientWidth / (canvas.width || 1);
       return { x: ir.x * k, y: ir.y * k, w: ir.w * k, h: ir.h * k }; } });
     (globalThis as any).wc3Input = inp;
+    fs.onclick = () => { void inp.enterFullscreen().then(() => canvas.focus()); };
     // sound: the context starts on the first click or key (the browser's rule)
     attachAudio(p, { log, gestureTarget: window }).then(a => { (globalThis as any).wc3Audio = a; log('[page] audio attached'); },
                                                        e => log('[page] no audio: ' + e));

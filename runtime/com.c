@@ -2502,9 +2502,11 @@ int com_call(CPU *c, uint32_t magic){
                  * canvas.  Left at 0 it took the canvas size while the game
                  * drew for 1280x720: viewport scissors (game view, portrait)
                  * landed in the wrong place, in fullscreen more so. */
-                if ((!w4 || !h4) && win4){ w4 = g_bb_w ? g_bb_w : 1280u; h4 = g_bb_h ? g_bb_h : 720u; }
+                if ((!w4 || !h4) && win4){ unsigned gw = 0, gh = 0; void metal_game_size(unsigned *, unsigned *);
+                    metal_game_size(&gw, &gh); w4 = gw ? gw : 1280u; h4 = gh ? gh : 720u; }
                 if (w4 && h4){
                     g_bb_w = w4; g_bb_h = h4;
+                    { void ffp_device_size(unsigned, unsigned); ffp_device_size(w4, h4); }
                     void metal_want_size(unsigned,unsigned);
                     metal_want_size(w4,h4);              /* if the window is not open yet */
                     if (metal_available()){ void metal_resize(unsigned,unsigned);
@@ -3980,7 +3982,7 @@ int com_call(CPU *c, uint32_t magic){
             else if (!strncmp(nm,"GetVertexShaderConstant",23)
                   || !strncmp(nm,"GetPixelShaderConstant",22)) sz=16*4;
             if (p && p < 0xE0000000u){ mem_commit(p,sz); memset(g_mem+p,0,sz); }
-            if (MID(GetViewport) && p){ MR32(p+8)=1280; MR32(p+12)=720; MRF32(p+20)=1.0f; }
+            if (MID(GetViewport) && p){ MR32(p+8)=g_bb_w; MR32(p+12)=g_bb_h; MRF32(p+20)=1.0f; }
             r=0; }
         else r=0;                        /* remaining Set* -> D3D_OK */
     }
