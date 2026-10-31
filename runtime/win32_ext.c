@@ -657,7 +657,11 @@ static pthread_mutex_t *cs_for(uint32_t key){
         }
     }
     pthread_mutex_unlock(&g_cs_tab);
-    return 0;                      /* table full: fall back to the old behaviour */
+    /* table full: fall back to the old behaviour, which no longer excludes anything
+     * (DeleteCriticalSection keeps its slot): said once, it may explain a corrupted list */
+    { static int said; if (!said++) fprintf(stderr, "[cs] critical section table full (%d): 0x%08x and every new one after it "
+                                                    "are not locked\n", MAXCS, key); }
+    return 0;
 }
 
 /* Owner/recursion of a section (watchdog report); only its owner changes them. */

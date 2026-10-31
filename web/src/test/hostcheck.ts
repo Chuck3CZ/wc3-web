@@ -82,3 +82,23 @@ const net = q.has('net') ? attachNet(p, { name: q.get('net') || 'test', log, onN
 const code = await p.exited;
 if (net) log(`NET ${JSON.stringify(net.stats())}`);
 log(`EXIT ${code}`); flush(); document.title = 'DONE';
+// the other game threads would stay where the exit left them: a trapped thread keeps the GIL, the rest wait for it
+// (the picture froze, the watchdog reported every 20 s), so they stop with the process
+p.terminate();
+if (gpu && code !== 0) {
+  const box = document.createElement('div');
+  box.style.cssText = 'margin:6px 0;padding:10px 12px;background:#7a1010;color:#fff;font:14px/1.4 system-ui,sans-serif;max-width:1280px';
+  box.textContent = code === 134
+    ? 'Hra spadla (chyba ve hře, kód 134, „TRAP“ v logu). Není to výpadek internetu: stránka po pádu odpojila tento prohlížeč od LAN, '
+      + 'proto ostatním hráčům hra skončila. Ulož si log, obnov stránku (F5) a založte hru znovu.'
+    : `Hra skončila s kódem ${code}. Ulož si log a obnov stránku (F5).`;
+  const save = document.createElement('button'); save.textContent = 'Uložit log'; save.style.cssText = 'margin-left:10px;font-size:14px';
+  save.onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([pre.textContent ?? ''], { type: 'text/plain' }));
+    a.download = `wc3-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  };
+  box.append(save);
+  canvas.after(box);
+}
