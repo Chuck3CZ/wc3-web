@@ -2631,6 +2631,11 @@ int com_call(CPU *c, uint32_t magic){
                  *  StartIndex, PrimitiveCount) */
                 uint32_t pt=A(c,1), basev=A(c,2), starti=A(c,5), nprim=A(c,6);
                 r=0;
+#define DIP_SKIP(why) do { g_dip_skip++; static int said_; if (said_++ < 4) \
+    fprintf(stderr, "[draw] DrawIndexedPrimitive dropped (%s): type %u, %u primitives, stride %u, fvf 0x%x, base %u, start %u\n", \
+            why, pt, nprim, g_ss_stride, g_cur_fvf, basev, starti); } while (0)
+                if (!(metal_available() && g_ss_vb && g_ib_obj && g_ss_stride && nprim && nprim < 200000u) && metal_available())
+                    DIP_SKIP(!g_ss_vb ? "no vertex buffer" : !g_ib_obj ? "no index buffer" : !g_ss_stride ? "no stride" : "primitive count");
                 if (metal_available() && g_ss_vb && g_ib_obj && g_ss_stride &&
                     nprim && nprim < 200000u){
                     uint32_t vbase = MR32(g_ss_vb+8) + g_ss_off;
@@ -2638,12 +2643,13 @@ int com_call(CPU *c, uint32_t magic){
                     uint32_t ifmt  = MR32(g_ib_obj+12);
                     uint32_t isz   = (ifmt==102u) ? 4u : 2u;   /* INDEX32 : INDEX16 */
                     uint32_t ntri  = (pt==4u||pt==5u||pt==6u) ? nprim : 0u;
-                    if ((pt==2u || pt==3u) && vbase && ibase && g_ss_stride <= 64u){
+                    if ((pt==2u || pt==3u) && vbase && ibase && g_ss_stride <= 256u){
                         /* lines (WC3: the selection box, the minimap's camera
                          * frame): the indices in order, then draw_up's line path */
                         if (!g_idx_scratch) g_idx_scratch = gbuf_alloc(4096u*64u);
                         uint32_t nv = (pt==2u) ? nprim*2u : nprim+1u, ok = 1;
-                        if (nv > 4094u) nv = 4094u & ~1u;
+                        uint32_t room = (4096u*64u) / g_ss_stride; if (room > 4094u) room = 4094u;
+                        if (nv > room) nv = room & ~1u;
                         for (uint32_t k=0; k<nv && ok; k++){
                             uint32_t ia = ibase + (starti + k)*isz;
                             if (!mem_is_committed(ia+isz-1u)){ ok=0; break; }
@@ -2653,16 +2659,19 @@ int com_call(CPU *c, uint32_t magic){
                             memcpy(g_mem + g_idx_scratch + k*g_ss_stride, g_mem+src, g_ss_stride);
                         }
                         if (ok){ draw_up(pt, nv, g_idx_scratch, g_ss_stride); g_dip_draws++; }
-                        else g_dip_skip++;
+                        else DIP_SKIP("lines outside committed memory");
                     }
-                    else if (!ntri || !vbase || !ibase){ g_dip_skip++; }
+                    else if (!ntri || !vbase || !ibase){ DIP_SKIP(!ntri ? "primitive type" : "buffer without memory"); }
                     else if (dip_indexed(pt, basev, starti, ntri, isz)){
                         g_dip_draws++; g_dip_tris += ntri; }
                     else {
                         if (!g_idx_scratch) g_idx_scratch = gbuf_alloc(4096u*64u);
-                        uint32_t maxv = 4095u / 3u * 3u;       /* draw_up limit */
+                        /* draw_up's limit, and what the scratch buffer holds at this stride */
+                        uint32_t room = (4096u*64u) / g_ss_stride; if (room > 4095u) room = 4095u;
+                        uint32_t maxv = room / 3u * 3u;
                         uint32_t done = 0;
-                        while (done < ntri && g_ss_stride <= 64u){
+                        if (g_ss_stride > 256u) DIP_SKIP("stride over 256");
+                        while (done < ntri && g_ss_stride <= 256u){
                             uint32_t chunk = ntri - done;
                             if (chunk*3u > maxv) chunk = maxv/3u;
                             uint32_t nv = chunk*3u, ok = 1;
@@ -2683,7 +2692,7 @@ int com_call(CPU *c, uint32_t magic){
                                     memcpy(g_mem+dst, g_mem+src, g_ss_stride);
                                 }
                             }
-                            if (!ok){ g_dip_skip++; break; }
+                            if (!ok){ DIP_SKIP("index or vertex outside committed memory"); break; }
                             draw_up(4u, nv, g_idx_scratch, g_ss_stride);
                             g_dip_draws++; g_dip_tris += chunk;
                             done += chunk;
@@ -2691,6 +2700,7 @@ int com_call(CPU *c, uint32_t magic){
                     }
                 }
             }
+#undef DIP_SKIP
             else if (MID(DrawPrimitiveUP)){
                 /* (this, PrimitiveType, PrimitiveCount, pVertexData, VertexStride) */
                 static uint64_t ptype[8], stride_hist[64];

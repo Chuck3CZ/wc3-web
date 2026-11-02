@@ -638,14 +638,17 @@ void metal_set_ui_clip(float sy){
     g_cur_clip = y0 | (y1 > h ? h : y1) << 16;
 }
 /* com.c, a draw with a viewport smaller than the target (the unit portrait):
- * kept inside it, as D3D clips to the viewport.  Bit 31 marks the rectangle
- * form of GwDraw.clip: x0 | y0 << 8 | x1 << 16 | y1 << 24, 8-pixel units
- * (rounded outward; up to 2040 x 1016 pixels). */
+ * kept inside it, as D3D clips to the viewport.  GwDraw.clip = 0x80000000
+ * marks it; the rectangle, in pixels, goes in the record's clear fields (a
+ * draw has none): clr_argb = x0 | y0 << 16, clr_flags = x1 | y1 << 16.
+ * (8-pixel units in clip itself ended at 1016 rows: half a portrait at a
+ * screen-size resolution.) */
+static uint32_t g_cur_vprect[2];
 void metal_set_vp_clip(int x0, int y0, int x1, int y1){
-    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
-    unsigned a = (unsigned)x0 >> 3, b = (unsigned)y0 >> 3, c = ((unsigned)x1 + 7u) >> 3, d = ((unsigned)y1 + 7u) >> 3;
-    if (c > 255u) c = 255u; if (d > 127u) d = 127u;
-    g_cur_clip = 0x80000000u | a | b << 8 | c << 16 | d << 24;
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > 65535) x1 = 65535; if (y1 > 65535) y1 = 65535;
+    if (x1 < x0) x1 = x0; if (y1 < y0) y1 = y0;
+    g_cur_clip = 0x80000000u;
+    g_cur_vprect[0] = (uint32_t)x0 | (uint32_t)y0 << 16; g_cur_vprect[1] = (uint32_t)x1 | (uint32_t)y1 << 16;
 }
 void metal_begin_frame(void){ }
 
@@ -674,6 +677,7 @@ static GwDraw *rec_draw(Buf *B, unsigned tex){
     D->bcol = g_cur_bcol; D->cull = g_cur_cull;
     memcpy(D->fogv, g_cur_fog, sizeof D->fogv);
     D->clip = g_cur_clip;
+    if (g_cur_clip & 0x80000000u){ D->clr_argb = g_cur_vprect[0]; D->clr_flags = g_cur_vprect[1]; }
     return D;
 }
 void metal_draw_tv(const TVert *src, unsigned nverts, unsigned prim, unsigned tex){

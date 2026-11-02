@@ -598,7 +598,7 @@ export class Encoder {
     let clearArgb = u32[fw + F.clearArgb];
     let cPipe: GPURenderPipeline | null = null, cSrc = -1, cK = -1, cP = -1, cBcol = -1, cIx = '';
     // the pass's size, and the scissor in effect in it (a GwDraw.clip value; 0 = the whole target)
-    let passW = 0, passH = 0, cClip = 0;
+    let passW = 0, passH = 0, cClip: number | string = 0;
     // the previous draw's pipeline (pipelines outlive passes, so this survives a pass change)
     let lastKey = -1, lastPipe: GPURenderPipeline | null | undefined;
     const b1 = this.b1, dyn = this.dyn;
@@ -711,12 +711,15 @@ export class Encoder {
       if (pipe !== cPipe) { p.setPipeline(pipe); cPipe = pipe; this.calls.pipe++; }
       // the 2D UI on a screen narrower than 4:3 stays in its 4:3 band (gpu_proto.h GwDraw.clip), on the
       // back buffer or a target of its size
-      const clip = passW === bbW && passH === bbH ? u32[w + D.clip] : 0;
+      const clip0 = passW === bbW && passH === bbH ? u32[w + D.clip] : 0;
+      // a viewport rectangle (gpu_proto.h GwDraw.clip): its pixels make the key, so two rectangles differ
+      const clip = clip0 & 0x80000000 ? `r${u32[w + D.clrArgb]},${u32[w + D.clrFlags]}` : clip0;
       if (clip !== cClip) {
-        const y0 = Math.min(clip & 0xFFFF, passH), y1 = Math.min(clip >>> 16, passH);
-        if (clip & 0x80000000) {        // a viewport rectangle, 8-pixel units (gpu_proto.h GwDraw.clip)
-          const x0 = Math.min((clip & 255) * 8, passW), ry0 = Math.min(((clip >>> 8) & 255) * 8, passH);
-          const x1 = Math.min(((clip >>> 16) & 255) * 8, passW), ry1 = Math.min(((clip >>> 24) & 127) * 8, passH);
+        const cn = typeof clip === "number" ? clip : 0, y0 = Math.min(cn & 0xFFFF, passH), y1 = Math.min(cn >>> 16, passH);
+        if (typeof clip === 'string') {   // a viewport rectangle in pixels
+          const a = u32[w + D.clrArgb], b = u32[w + D.clrFlags];
+          const x0 = Math.min(a & 0xFFFF, passW), ry0 = Math.min(a >>> 16, passH);
+          const x1 = Math.min(b & 0xFFFF, passW), ry1 = Math.min(b >>> 16, passH);
           p.setScissorRect(x0, ry0, Math.max(0, x1 - x0), Math.max(0, ry1 - ry0));
         } else if (clip) p.setScissorRect(0, y0, passW, Math.max(0, y1 - y0)); else p.setScissorRect(0, 0, passW, passH);
         cClip = clip;
