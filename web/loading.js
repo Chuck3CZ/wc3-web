@@ -25,16 +25,16 @@
   try { cs = (localStorage.getItem('landing-lang') || navigator.language || 'cs').slice(0, 2) !== 'en'; } catch {}
   const th = q.get('theme') === 'cmr' ? { a: '#ff6a1a', bg: '#0e0f12' } : { a: '#d9a441', bg: '#0b0e16' };
   const T = cs
-    ? { h: 'Hra se spouští', s: 'Nejdéle trvá první spuštění: hra načítá data a překládá shadery.', hide: 'Skrýt', fail: 'Spuštění se nezdařilo', failsub: 'Podrobnosti jsou v logu pod hrou. Zkus obnovit stránku (F5).',
+    ? { h: 'Hra se spouští', s: 'Nech tuto kartu otevřenou v popředí: skrytá nebo neaktivní karta hru pozastaví. Nejdéle trvá první spuštění.', hide: 'Skrýt', fail: 'Spuštění se nezdařilo', failsub: 'Podrobnosti jsou v logu pod hrou. Zkus obnovit stránku (F5).',
         click: 'Klikni myší do okna hry. Bez toho se hra bere jako neaktivní (Windows inactive).', frames: 'snímků', draws: 'kreslí',
         slow: 'Kompilace velkého modulu v prohlížeči může trvat desítky sekund. Stránka nezamrzla, čas běží.', cached: 'z paměti prohlížeče', mb: 'MB',
         steps: ['Stáhnout modul hry', 'Zkompilovat modul', 'Spustit vlákna hry', 'Připravit grafiku (WebGPU)', 'Hra vytváří grafické zařízení', 'Čekám na první obraz'] }
-    : { h: 'Starting the game', s: 'The first start takes the longest: the game loads data and translates shaders.', hide: 'Hide', fail: 'The start failed', failsub: 'Details are in the log under the game. Try reloading (F5).',
+    : { h: 'Starting the game', s: 'Keep this tab open in the foreground: a hidden or inactive tab pauses the game. The first start takes the longest.', hide: 'Hide', fail: 'The start failed', failsub: 'Details are in the log under the game. Try reloading (F5).',
         click: 'Click the game window with the mouse. Without it the game counts as inactive (Windows inactive).', frames: 'frames', draws: 'drawing',
         slow: 'Compiling a big module in the browser can take tens of seconds. The page has not frozen, the time keeps running.', cached: 'from the browser', mb: 'MB',
         steps: ['Download the game module', 'Compile the module', 'Start the game threads', 'Set up graphics (WebGPU)', 'The game creates its graphics device', 'Waiting for the first picture'] };
   // log lines that finish steps 1..4 (step 0, the download, is finished by the fetch below; step 5 by the picture)
-  const RE = [null, /^compiled in/, /^\[pool\] \d+ game workers started/, /^\[gpu\] renderer attached/, /CreateDevice/];
+  const RE = [null, /^compiled in/, /^\[thread\] start tid=|^\[pool\] \d+ game workers started/, /^\[gpu\] renderer attached/, /CreateDevice/];
   // The game is "on" when it has drawn and shown a picture.  Counters only, nothing is read back: the first draw call
   // (the hooks then remove themselves) and the frames the renderer takes from the canvas after it (getCurrentTexture).
   const gpuN = { drawn: false, framesAtDraw: 0, frames: 0 };
@@ -163,7 +163,7 @@
     if (done[4] && !done[5]) {
       detail(5, gpuN.frames + ' ' + T.frames + (gpuN.drawn ? ', ' + T.draws : ''));
       if (gpuN.drawn !== gpuSeen.drawn || (gpuN.frames > 0 && gpuSeen.frames === 0)) { gpuSeen.drawn = gpuN.drawn; gpuSeen.frames = gpuN.frames; rep('gpu: drawn=' + gpuN.drawn + ' frames=' + gpuN.frames); }
-      if (gpuN.drawn && gpuN.frames > gpuN.framesAtDraw) { rep('first picture: frames=' + gpuN.frames); done[5] = true; paint(); finish(); return; }
+      if (gpuN.drawn && gpuN.frames - gpuN.framesAtDraw >= 30 && !document.hidden) { rep('first picture: frames=' + gpuN.frames); done[5] = true; paint(); finish(); return; }
     }
     if (diagEl && diagLines.length !== diagShown) { diagShown = diagLines.length; diagEl.textContent = diagLines.slice(-8).join('\n'); diagEl.scrollTop = diagEl.scrollHeight; }
   }, 300));
