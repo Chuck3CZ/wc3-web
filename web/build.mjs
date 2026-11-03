@@ -48,6 +48,8 @@ fs.rmSync(path.join(DIST, 'test'), { recursive: true, force: true });
 for (const f of fs.existsSync(DIST) ? fs.readdirSync(DIST, { recursive: true }) : []) if (String(f).endsWith('.map')) fs.rmSync(path.join(DIST, String(f)));
 fs.mkdirSync(path.join(DEV, 'test'), { recursive: true });
 fs.mkdirSync(DIST, { recursive: true });
+// the player's loading overlay on the game's page (loading.js, a classic script before hostcheck.js)
+fs.copyFileSync('loading.js', path.join(DEV, 'test', 'loading.js'));
 // the start page (its script and stylesheet are main.js / main.css), and its files as they are (src/static: the
 // app's manifest and icons, for installing it on a phone's home screen or as a desktop app)
 if (HAVE_APP) {
@@ -59,7 +61,7 @@ fs.rmSync(path.join(DIST, 'lang'), { recursive: true, force: true });
 fs.mkdirSync(path.join(DIST, 'lang'));
 if (fs.existsSync('src/app/lang')) for (const f of fs.readdirSync('src/app/lang')) if (f.endsWith('.json'))
   fs.writeFileSync(path.join(DIST, 'lang', f), JSON.stringify(JSON.parse(fs.readFileSync(path.join('src/app/lang', f), 'utf8'))));
-const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title><script type=module src="/test/${name}.js"></script>`;
+const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title>${name === 'hostcheck' ? '<script src="/test/loading.js"></script>' : ''}<script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck'].filter(n => opts.entryPoints['test/' + n])) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)
 fs.writeFileSync(path.join(DEV, 'test', 'dev.json'), '{"dev":true}\n');
