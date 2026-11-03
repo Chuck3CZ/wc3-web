@@ -6,6 +6,7 @@
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 const watch = process.argv.includes('--watch');
 const DIST = 'dist', DEV = 'dist-dev';
 const opts = {
@@ -61,7 +62,9 @@ fs.rmSync(path.join(DIST, 'lang'), { recursive: true, force: true });
 fs.mkdirSync(path.join(DIST, 'lang'));
 if (fs.existsSync('src/app/lang')) for (const f of fs.readdirSync('src/app/lang')) if (f.endsWith('.json'))
   fs.writeFileSync(path.join(DIST, 'lang', f), JSON.stringify(JSON.parse(fs.readFileSync(path.join('src/app/lang', f), 'utf8'))));
-const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title>${name === 'hostcheck' ? '<script src="/test/loading.js"></script>' : ''}<script type=module src="/test/${name}.js"></script>`;
+// loading.js is named by its content (?v=): a browser or a proxy that kept an older one cannot run it for the new page
+const LOADV = crypto.createHash('sha1').update(fs.readFileSync('loading.js')).digest('hex').slice(0, 8);
+const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title>${name === 'hostcheck' ? `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck'].filter(n => opts.entryPoints['test/' + n])) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)
 fs.writeFileSync(path.join(DEV, 'test', 'dev.json'), '{"dev":true}\n');
