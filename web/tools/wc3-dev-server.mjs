@@ -84,35 +84,96 @@ function sendFile(req, res, full, type) {
 import { WebSocketServer } from 'ws';
 import crypto from 'node:crypto';
 const lan = new WebSocketServer({ noServer: true });
-const peers = new Map();            // vip -> { ws, name }
+// A page whose hello says "replay":1 keeps its place through a lost link: what the switch sends it is counted and
+// kept until the page says it has it ("rx" in its pings), and the page does the same the other way (our "rx" in each
+// pong), so after a resume (its hello with the address, the token and its "rx") what did not arrive goes again and
+// the game's TCP connections never notice.  Meanwhile the place is held (on everyone's peer list, frames to it kept)
+// for HOLD_MS; a page that closed the link itself (1000: idle, the game ended; 1001: the page went) frees it at once.
+const HOLD_MS = 150_000, HOLD_BYTES = 32 << 20;
+const peers = new Map();            // vip -> { vip, ws, name, token, replay, rxIn, out, outBase, outBytes, hold, heldAt }
 let nextHost = 2;
 const ipStr = v => [v >>> 24, (v >>> 16) & 255, (v >>> 8) & 255, v & 255].join('.');
+const ipNum = s => typeof s === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(s) ? s.split('.').reduce((a, b) => (a * 256 + (+b)) >>> 0, 0) : 0;
+const live = p => p.ws && p.ws.readyState === 1;
 const peerList = () => [...peers].map(([vip, p]) => ({ vip, name: p.name }));
 const tellPeers = () => { const m = JSON.stringify({ t: 'peers', peers: peerList() });
-  for (const p of peers.values()) if (p.ws.readyState === 1) p.ws.send(m); };
+  for (const p of peers.values()) if (live(p)) p.ws.send(m); };
+function newVip() {
+  for (let i = 0; i < 253; i++) {
+    const v = ((10 << 24) | (77 << 16) | (2 + (nextHost++ - 2) % 253)) >>> 0;
+    if (!peers.has(v)) return v;
+  }
+  return 0;
+}
+function forget(p, why) {
+  if (peers.get(p.vip) !== p) return;
+  clearTimeout(p.hold); peers.delete(p.vip);
+  console.log(`[lan] ${ipStr(p.vip)} left (${why})`); tellPeers();
+}
+/** the page has our messages up to number n */
+function trimOut(p, n) {
+  const k = n - p.outBase;
+  if (!(k > 0) || k > p.out.length) return;
+  for (let i = 0; i < k; i++) p.outBytes -= p.out[i].length;
+  p.out.splice(0, k); p.outBase = n;
+}
+function sendTo(p, frame) {
+  if (p.replay) {
+    p.out.push(frame); p.outBytes += frame.length;
+    if (p.outBytes > HOLD_BYTES) {
+      if (!p.ws) { forget(p, 'too much waited for it'); return; }
+      p.outBase += p.out.length; p.out = []; p.outBytes = 0;     // it does not say what it got: no resume for it
+    }
+  }
+  if (live(p)) p.ws.send(frame);
+}
 function route(from, frame) {
   if (frame.length < 12) return;
   frame.writeUInt32BE(from, 4);
   const dst = frame.readUInt32BE(8);
-  if (dst === 0xFFFFFFFF) { for (const [v, p] of peers) if (v !== from && p.ws.readyState === 1) p.ws.send(frame); }
-  else { const p = peers.get(dst); if (p && p.ws.readyState === 1) p.ws.send(frame); }
+  if (dst === 0xFFFFFFFF) { for (const [v, p] of peers) if (v !== from) sendTo(p, frame); }
+  else { const p = peers.get(dst); if (p) sendTo(p, frame); }
 }
 lan.on('connection', ws => {
-  let vip = 0;
+  let me = null;
+  const mine = () => me && peers.get(me.vip) === me && me.ws === ws ? me : null;
   ws.on('message', (data, isBinary) => {
     if (!isBinary) {
       let m; try { m = JSON.parse(String(data)); } catch { return; }
-      if (m.t === 'hello' && !vip) {
-        const old = typeof m.vip === 'string' ? m.vip.split('.').reduce((a, b) => (a * 256 + (+b)) >>> 0, 0) : 0;
-        vip = old && !peers.has(old) ? old : ((10 << 24) | (77 << 16) | (nextHost++ & 255)) >>> 0;
-        peers.set(vip, { ws, name: String(m.name ?? 'player').slice(0, 32) });
-        ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: ipStr(vip), mask: '255.255.255.0', token: crypto.randomBytes(16).toString('hex') }));
-        console.log(`[lan] ${ipStr(vip)} "${peers.get(vip).name}" joined (${peers.size} on the LAN)`);
+      if (m.t === 'hello' && !me) {
+        const name = String(m.name ?? 'player').slice(0, 32), old = ipNum(m.vip), held = old ? peers.get(old) : null;
+        if (held && held.replay && m.replay === 1 && typeof m.token === 'string' && m.token === held.token &&
+            Number.isInteger(m.rx) && m.rx >= held.outBase && m.rx <= held.outBase + held.out.length) {
+          // the same session again: the place was held (or its old link died without a close we heard)
+          if (held.ws && held.ws !== ws) { const o = held.ws; held.ws = null; o.terminate(); }
+          clearTimeout(held.hold); held.hold = null;
+          const away = held.heldAt ? ((Date.now() - held.heldAt) / 1000).toFixed(1) : '0';
+          held.heldAt = 0; held.ws = ws; held.name = name; me = held;
+          trimOut(held, m.rx);
+          ws.send(JSON.stringify({ t: 'welcome', vip: old, vipStr: ipStr(old), mask: '255.255.255.0', token: held.token, replay: 1, resumed: 1, rx: held.rxIn }));
+          for (const f of held.out) ws.send(f);
+          ws.send(JSON.stringify({ t: 'peers', peers: peerList() }));
+          console.log(`[lan] ${ipStr(old)} "${name}" back after ${away} s (${held.out.length} frame(s) sent again)`);
+          return;
+        }
+        // a new session (a held place is never given to another page: it waits for its token)
+        const vip = old && !peers.has(old) ? old : newVip();
+        if (!vip) { ws.close(1013, 'LAN full'); return; }
+        me = { vip, ws, name, token: crypto.randomBytes(16).toString('hex'), replay: m.replay === 1, rxIn: 0, out: [], outBase: 0, outBytes: 0, hold: null, heldAt: 0 };
+        peers.set(vip, me);
+        ws.send(JSON.stringify({ t: 'welcome', vip, vipStr: ipStr(vip), mask: '255.255.255.0', token: me.token, ...(me.replay ? { replay: 1 } : {}) }));
+        console.log(`[lan] ${ipStr(vip)} "${name}" joined (${peers.size} on the LAN)`);
         tellPeers();
-      } else if (m.t === 'ping') ws.send(JSON.stringify({ t: 'pong', id: m.id }));
+      } else if (m.t === 'ping') {
+        const p = mine();
+        if (p && p.replay && Number.isInteger(m.rx)) trimOut(p, m.rx);
+        ws.send(JSON.stringify({ t: 'pong', id: m.id, ...(p && p.replay ? { rx: p.rxIn } : {}) }));
+      }
       return;
     }
-    if (!vip) return;
+    const p = mine();
+    if (!p) return;
+    p.rxIn++;
     const b = Buffer.isBuffer(data) ? data : Buffer.from(data);
     if (b[0] === 32) {                                   // a bundle: [0] n, [2..3] length, n x destination, frame
       let o = 4;
@@ -121,12 +182,22 @@ lan.on('connection', ws => {
         const dsts = []; for (let i = 0; i < n; i++) { dsts.push(b.readUInt32BE(o)); o += 4; }
         if (o + len > b.length) break;
         const f = Buffer.from(b.subarray(o, o + len)); o += len;
-        if (!n) route(vip, f);
-        else for (const d of dsts) { const g = Buffer.from(f); g.writeUInt32BE(d, 8); route(vip, g); }
+        if (!n) route(p.vip, f);
+        else for (const d of dsts) { const g = Buffer.from(f); g.writeUInt32BE(d, 8); route(p.vip, g); }
       }
-    } else if (b[0] !== 33) route(vip, Buffer.from(b));
+    } else if (b[0] !== 33) route(p.vip, Buffer.from(b));
   });
-  ws.on('close', () => { if (vip && peers.get(vip)?.ws === ws) { peers.delete(vip); console.log(`[lan] ${ipStr(vip)} left`); tellPeers(); } });
+  ws.on('close', code => {
+    const p = mine();
+    if (!p) return;
+    if (p.replay && code !== 1000 && code !== 1001) {
+      p.ws = null; p.heldAt = Date.now();
+      p.hold = setTimeout(() => forget(p, `not back within ${HOLD_MS / 1000} s`), HOLD_MS);
+      console.log(`[lan] ${ipStr(p.vip)} "${p.name}" lost its link (${code}): its place is held ${HOLD_MS / 1000} s`);
+      return;
+    }
+    forget(p, code === 1000 ? 'closed' : String(code));
+  });
 });
 
 const server = http.createServer((req, res) => {
