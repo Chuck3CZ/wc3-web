@@ -25,6 +25,9 @@ const PORT = +arg('--port', 8086);
 const HOST = arg('--host', '127.0.0.1');   // 0.0.0.0: reachable from the LAN (Chrome there needs a secure origin)
 // the game module and where the test pages' logs and screenshots go (Docker: a volume each)
 const WASM = arg('--wasm', path.join(ROOT, 'out', 'web', 'wc3.wasm'));
+// which game this server is (the hub's id: wc3, rally, bulanci): the accounts ask for it, the module is served as /<id>.wasm
+const GAME_ID = arg('--game', process.env.GAME_ID || 'wc3');
+const MODULE_URL = '/' + GAME_ID + '.wasm';
 const OUT = arg('--out', path.join(ROOT, 'out'));
 if (!DATA || !fs.statSync(DATA, { throwIfNoEntry: false })?.isDirectory()) {
   console.error('usage: node web/tools/wc3-dev-server.mjs --data "<Warcraft III folder>" [--port 8086]'); process.exit(2);
@@ -220,7 +223,7 @@ lan.on('connection', ws => {
 // Without --hub (a dev machine) the server is open as before.  HUB_KEY (environment): the hub's key for activity.
 const HUB = (arg('--hub', process.env.HUB || '') || '').replace(/\/$/, '');
 const HUB_LOGIN = arg('--hub-login', process.env.HUB_LOGIN || 'https://hry.gabrhelovi.cz/');
-const HUB_KEY = process.env.HUB_KEY || '', GAME_ID = 'wc3', HUB_CACHE = 30_000;
+const HUB_KEY = process.env.HUB_KEY || '', HUB_CACHE = 30_000;
 const hubSeen = new Map();            // the cookie -> { t, me }
 let hubDown = 0;                      // when the hub last did not answer (the start page says so instead of "sign in")
 async function whoIs(req) {
@@ -359,7 +362,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, ISOLATION).end(); return; }
   if (p === '/data-manifest') { res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json' }).end(MANIFEST); return; }
   if (p.startsWith('/data/')) { const f = inside(DATA, p.slice(6)); return f ? sendFile(req, res, f) : res.writeHead(403, ISOLATION).end(); }
-  if (p === '/wc3.wasm') return sendFile(req, res, WASM, undefined, moduleInfo());
+  if (p === MODULE_URL || p === '/wc3.wasm') return sendFile(req, res, WASM, undefined, moduleInfo());   // /wc3.wasm: the name all the ports had
   // the start page: a name, then the game (web/landing.html); without it the test page
   if (p === '/') {
     const land = path.join(ROOT, 'web', 'landing.html');
