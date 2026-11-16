@@ -14,5 +14,7 @@ cp web/tools/wc3-dev-server.mjs "$B/app/web/tools/"
 cp web/landing.html "$B/app/web/"
 cp -r web/dist web/dist-dev "$B/app/web/"
 cp out/web/wc3.wasm out/qnap/module/
+# the module these pages belong to: the start page refuses another one (an old module from a backup next to new pages)
+printf '{"sha256":"%s","size":%s}\n' "$(sha256sum out/web/wc3.wasm | cut -d' ' -f1)" "$(stat -c%s out/web/wc3.wasm)" > "$B/app/web/dist/module.json"
 echo "rev $(git rev-parse --short HEAD)$(git diff --quiet || echo +)" > "$B/REVISION"
 du -sh "$B" out/qnap/module | sed 's/^/pack-qnap: /'

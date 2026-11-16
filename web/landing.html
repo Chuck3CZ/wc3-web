@@ -324,10 +324,10 @@ const UI = {
     c_br: 'Prohlížeč', c_br_warn: 'Hra je testovaná v Chrome a Edge. Jiný prohlížeč nemusí fungovat.',
     c_ptr: 'Myš a klávesnice', c_ptr_warn: 'Vypadá to na dotykové zařízení bez myši. Hra se ovládá myší a klávesnicí.',
     checking: 'kontroluji…',
-    s_mod: 'Modul hry', s_data: 'Herní data na serveru', s_up: 'aktualizováno', s_ok: 'k dispozici', s_no: 'nedostupná', s_srv: 'Server neodpovídá. Je stránka otevřená z hostitelského serveru?',
+    s_mod: 'Modul hry', s_data: 'Herní data na serveru', s_up: 'aktualizováno', s_ok: 'k dispozici', s_no: 'nedostupná', s_modbad: 'jiná verze než stránka, hra by se nevykreslovala (dej vědět správci)', s_srv: 'Server neodpovídá. Je stránka otevřená z hostitelského serveru?',
     l_chk: 'Kontrola prohlížeče', l_mod: 'Stažení modulu hry', l_data: 'Připojení k herním datům', l_go: 'Spuštění hry',
     l_sub0: 'Chvilku strpení…', l_sub_mod: 'Stahuji modul hry. Příště se načte z paměti prohlížeče.', l_sub_go: 'Otevírám hru. Další načítání uvidíš na její stránce.',
-    l_err_mod: 'Modul se nepodařilo stáhnout.', l_err_data: 'Herní data na serveru nejsou dostupná.',
+    l_err_mod: 'Modul se nepodařilo stáhnout.', l_err_modbad: 'Stažený modul je poškozený (nesouhlasí kontrolní součet). Zkus to znovu, případně v Pokročilém smaž uložený modul.', l_err_modsrv: 'Server posílá jinou verzi modulu hry, než ke které patří tahle stránka. Hra by se nevykreslovala správně – dej vědět správci serveru.', mod_redo: 'uložený modul byl poškozený nebo starý – stahuji znovu', mod_ok: 'ověřeno', l_err_data: 'Herní data na serveru nejsou dostupná.',
     cached: 'z paměti prohlížeče', mb: 'MB', badname: 'Jméno musí mít 2–15 znaků: písmena bez diakritiky, číslice, _ nebo -.',
   },
   en: {
@@ -348,10 +348,10 @@ const UI = {
     c_br: 'Browser', c_br_warn: 'The game is tested in Chrome and Edge. Another browser may not work.',
     c_ptr: 'Mouse and keyboard', c_ptr_warn: 'This looks like a touch device without a mouse. The game is played with mouse and keyboard.',
     checking: 'checking…',
-    s_mod: 'Game module', s_data: 'Game data on the server', s_up: 'updated', s_ok: 'available', s_no: 'unavailable', s_srv: 'The server does not answer. Is this page opened from the host server?',
+    s_mod: 'Game module', s_data: 'Game data on the server', s_up: 'updated', s_ok: 'available', s_no: 'unavailable', s_modbad: 'a different version than this page, the game would not draw (tell the operator)', s_srv: 'The server does not answer. Is this page opened from the host server?',
     l_chk: 'Browser check', l_mod: 'Downloading the game module', l_data: 'Connecting to the game data', l_go: 'Starting the game',
     l_sub0: 'One moment…', l_sub_mod: 'Downloading the module. Next time it loads from the browser cache.', l_sub_go: 'Opening the game. You will see the rest of the loading on its page.',
-    l_err_mod: 'The module could not be downloaded.', l_err_data: 'The game data on the server is not available.',
+    l_err_mod: 'The module could not be downloaded.', l_err_modbad: 'The downloaded module is damaged (checksum mismatch). Try again, or clear the stored module under Advanced.', l_err_modsrv: 'The server sends a different game module than this page belongs to. The game would not draw properly: tell the server operator.', mod_redo: 'the stored module was damaged or old: downloading again', mod_ok: 'verified', l_err_data: 'The game data on the server is not available.',
     cached: 'from the browser', mb: 'MB', badname: 'The name needs 2–15 characters: letters without accents, digits, _ or -.',
   },
 };
@@ -428,6 +428,9 @@ async function probe() {
       modEtag = r.headers.get('etag') || r.headers.get('last-modified') || '';
       srv = { ok: true, size: +r.headers.get('content-length') || 0, mod: r.headers.get('last-modified') ? new Date(r.headers.get('last-modified')) : null };
       try { srv.data = (await fetch('/data-manifest', { method: 'HEAD' })).ok; } catch { srv.data = false; }
+      // the module these pages belong to (module.json from the pack) against the one the server sends
+      const sha = r.headers.get('x-module-sha256') || '';
+      try { const m = await fetch('/module.json', { cache: 'no-store' }); if (m.ok && sha) srv.match = (await m.json()).sha256 === sha; } catch {}
     }
   } catch {}
   drawSrv();
@@ -438,7 +441,7 @@ function drawSrv() {
   if (!srv.ok) { box.append(el('span', t('s_srv'))); return; }
   const row = (k, v, dot) => { const d = el('div'); if (dot) d.append(el('span', null, 'dot ' + dot)); d.append(k + ': ', el('b', v)); box.append(d); };
   const when = srv.mod ? ', ' + t('s_up') + ' ' + srv.mod.toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '';
-  row(t('s_mod'), (srv.size ? nf().format(srv.size / 1048576) + ' ' + t('mb') : t('s_ok')) + when, 'on');
+  row(t('s_mod'), (srv.size ? nf().format(srv.size / 1048576) + ' ' + t('mb') : t('s_ok')) + when + (srv.match === false ? ' – ' + t('s_modbad') : srv.match ? ', ' + t('mod_ok') : ''), srv.match === false ? 'off' : 'on');
   row(t('s_data'), srv.data ? t('s_ok') : t('s_no'), srv.data ? 'on' : 'off');
   $('#ver').textContent = srv.mod ? srv.mod.toLocaleDateString(lang === 'cs' ? 'cs-CZ' : 'en-GB') : '';
 }
@@ -512,19 +515,31 @@ async function launch(name, force) {
     else {
     // the module goes into the Cache Storage under its ETag (the HTTP cache refuses a file this big); the game's page
     // (loading.js) reads the same entry, so the module comes over the network once per version
-    let etag = '', total = 0;
-    try { const h = await fetch(GAME.wasm, { method: 'HEAD', signal: sig }); etag = h.headers.get('etag') || h.headers.get('last-modified') || ''; total = +h.headers.get('content-length') || 0; modEtag = etag; } catch (e) { if (sig.aborted) return; }
+    let etag = '', total = 0, srvSha = '';
+    try { const h = await fetch(GAME.wasm, { method: 'HEAD', signal: sig }); etag = h.headers.get('etag') || h.headers.get('last-modified') || ''; total = +h.headers.get('content-length') || 0; srvSha = h.headers.get('x-module-sha256') || ''; modEtag = etag; } catch (e) { if (sig.aborted) return; }
+    // which module: the one these pages were packed with (module.json, none on a dev build) must be the one the server
+    // sends (X-Module-Sha256); the stored copy and a fresh download are checked against it, a bad one goes
+    let want = null; try { const r = await fetch('/module.json', { cache: 'no-store', signal: sig }); if (r.ok) want = await r.json(); } catch (e) { if (sig.aborted) return; }
+    if (want && want.sha256 && srvSha && want.sha256 !== srvSha) return fail(sMod, 'l_err_modsrv');
+    const ref = (want && want.sha256) || srvSha;
+    const shaHex = async b => [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map(x => x.toString(16).padStart(2, '0')).join('');
     let cache = null; try { cache = await caches.open('wasm-v1'); } catch {}
     const key = etag ? GAME.wasm + '?v=' + encodeURIComponent(etag) : '';
-    let hit = false; if (cache && key) { try { hit = !!(await cache.match(key)); } catch {} }
+    let hit = false, redo = false; if (cache && key) { try { hit = !!(await cache.match(key)); } catch {} }
+    if (hit && ref) {
+      mark(sMod, 'cur', t('checking'));
+      try { const r = await cache.match(key); if (!r || await shaHex(await r.arrayBuffer()) !== ref) { await cache.delete(key); hit = false; redo = true; } } catch { hit = false; redo = true; }
+      if (sig.aborted) return;
+    }
     let got = 0;
-    if (hit) mark(sMod, 'done', t('cached'));
+    if (hit) mark(sMod, 'done', t('cached') + (ref ? ', ' + t('mod_ok') : ''));
     else {
+      if (redo) { sub.textContent = t('mod_redo'); store.set(GAME.id + '-bust', String(Date.now())); }
       const r = await fetch(wasmUrl(), { signal: sig });
       if (!r.ok || !r.body) return fail(sMod, 'l_err_mod');
       total = total || +r.headers.get('content-length') || 0;
       let body = r.body, put = null;
-      if (cache && key) { const [a, b] = body.tee(); body = a; put = cache.put(key, new Response(b, { status: 200, headers: r.headers })).catch(() => {}); }
+      if (cache && key) { const [a, b] = body.tee(); body = a; put = cache.put(key, new Response(b, { status: 200, headers: r.headers })).then(() => true, () => false); }
       const rd = body.getReader(); let last = 0;
       for (;;) {
         const { done, value } = await rd.read();
@@ -533,7 +548,14 @@ async function launch(name, force) {
         const now = performance.now();
         if (now - last > 80) { last = now; if (total) { setProgress(got / total * 0.85); mark(sMod, 'cur', nf().format(got / 1048576) + ' / ' + nf().format(total / 1048576) + ' ' + t('mb')); } else mark(sMod, 'cur', nf().format(got / 1048576) + ' ' + t('mb')); }
       }
-      if (put) await put;
+      const stored = put ? await put : false;
+      // what was stored, read back: a damaged download never reaches the game
+      if (stored && ref) {
+        mark(sMod, 'cur', t('checking'));
+        let ok = false; try { const r = await cache.match(key); ok = !!r && await shaHex(await r.arrayBuffer()) === ref; } catch {}
+        if (sig.aborted) return;
+        if (!ok) { try { await cache.delete(key); } catch {} return fail(sMod, 'l_err_modbad'); }
+      }
       if (cache && key) { try { for (const k of await cache.keys()) if (new URL(k.url).pathname === GAME.wasm && !k.url.endsWith(key)) await cache.delete(k); } catch {} }
       mark(sMod, 'done', nf().format(got / 1048576) + ' ' + t('mb'));
     }

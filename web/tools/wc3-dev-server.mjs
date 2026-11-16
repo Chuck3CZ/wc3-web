@@ -58,11 +58,11 @@ function inside(root, rel) {
   const full = path.resolve(root, '.' + path.posix.normalize('/' + rel));
   return full === root || full.startsWith(root + path.sep) ? full : null;
 }
-function sendFile(req, res, full, type) {
+function sendFile(req, res, full, type, extra) {
   let st; try { st = fs.statSync(full); } catch { res.writeHead(404, ISOLATION).end('not found'); return; }
   if (!st.isFile()) { res.writeHead(404, ISOLATION).end('not found'); return; }
   const etag = `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
-  const h = { ...CACHED, ETag: etag, 'Content-Type': type ?? TYPES[path.extname(full).toLowerCase()] ?? 'application/octet-stream', 'Accept-Ranges': 'bytes' };
+  const h = { ...CACHED, ...extra, ETag: etag, 'Content-Type': type ?? TYPES[path.extname(full).toLowerCase()] ?? 'application/octet-stream', 'Accept-Ranges': 'bytes' };
   if (req.headers['if-none-match'] === etag && !req.headers.range) { res.writeHead(304, h).end(); return; }
   const m = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '');
   if (m) {
@@ -76,6 +76,16 @@ function sendFile(req, res, full, type) {
     if (req.method === 'HEAD') { res.end(); return; }
     fs.createReadStream(full).pipe(res);
   }
+}
+// the module's SHA-256 (X-Module-Sha256 on /wc3.wasm): the start page checks its saved copy and a download against it,
+// and the pages' own module.json (written by tools/pack-qnap.sh) against it, so a module from another build stops the start
+let modSha = { key: '', sha: '' };
+function moduleSha() {
+  try {
+    const st = fs.statSync(WASM), key = st.size + ':' + st.mtimeMs;
+    if (modSha.key !== key) modSha = { key, sha: crypto.createHash('sha256').update(fs.readFileSync(WASM)).digest('hex') };
+    return modSha.sha;
+  } catch { return ''; }
 }
 
 // ---- the virtual LAN switch (minimal; the real one is web/server-rs crates/lan) ----
@@ -251,7 +261,7 @@ const server = http.createServer((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, ISOLATION).end(); return; }
   if (p === '/data-manifest') { res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json' }).end(MANIFEST); return; }
   if (p.startsWith('/data/')) { const f = inside(DATA, p.slice(6)); return f ? sendFile(req, res, f) : res.writeHead(403, ISOLATION).end(); }
-  if (p === '/wc3.wasm') return sendFile(req, res, WASM);
+  if (p === '/wc3.wasm') return sendFile(req, res, WASM, undefined, { 'X-Module-Sha256': moduleSha() });
   // the start page: a name, then the game (web/landing.html); without it the test page
   if (p === '/') {
     const land = path.join(ROOT, 'web', 'landing.html');
