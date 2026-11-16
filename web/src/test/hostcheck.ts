@@ -103,7 +103,7 @@ if (script) {
 // a player's folder (the start page's p-<name>) goes to the server each time the game saves into it
 const saveDir = q.get('save') ?? '';
 let sync: SaveSync | null = null;
-if (me && /^p-[a-z0-9_-]{2,15}$/.test(saveDir)) sync = startSaveSync(saveDir, log, s => { syncNote.textContent = s; });
+if (me && /^[a-z0-9]{1,8}-[a-z0-9_-]{2,15}$/.test(saveDir)) sync = startSaveSync(saveDir, log, s => { syncNote.textContent = s; });
 const p = await startProcess({
   module: mod, pool: +(q.get('pool') ?? 24), initialPages: +(q.get('pages') ?? 1024),
   cfg: { args: ['nfsu2', ...(q.getAll('arg'))], env: { HOME: '/save', NFSU2_DATA: '/data', ...env, ...Object.fromEntries(q.getAll('env').map(e => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)])) }, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir: q.get('save') ?? 'save-test' },

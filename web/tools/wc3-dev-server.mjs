@@ -28,6 +28,8 @@ const WASM = arg('--wasm', path.join(ROOT, 'out', 'web', 'wc3.wasm'));
 // which game this server is (the hub's id: wc3, rally, bulanci): the accounts ask for it, the module is served as /<id>.wasm
 const GAME_ID = arg('--game', process.env.GAME_ID || 'wc3');
 const MODULE_URL = '/' + GAME_ID + '.wasm';
+// the start page's save folder prefix (GAME.savePrefix: p- for WC3, cmr- for the rally): with accounts a player's own is <prefix><name>
+const SAVE_PREFIX = arg('--save-prefix', process.env.SAVE_PREFIX || 'p-');
 const OUT = arg('--out', path.join(ROOT, 'out'));
 if (!DATA || !fs.statSync(DATA, { throwIfNoEntry: false })?.isDirectory()) {
   console.error('usage: node web/tools/wc3-dev-server.mjs --data "<Warcraft III folder>" [--port 8086]'); process.exit(2);
@@ -335,7 +337,7 @@ const server = http.createServer(async (req, res) => {
   // player progress, one zip per player (the start page's "Game progress"): /saves/<key>, key = the save folder's name.
   // Without accounts whoever knows the name can read and replace it; with them (--hub) only its player.
   const mSave = /^\/saves\/([a-z0-9_-]{1,60})$/.exec(p);
-  if (mSave && HUB && mSave[1] !== 'p-' + me.nick.toLowerCase()) { res.writeHead(403, ISOLATION).end(); return; }
+  if (mSave && HUB && mSave[1] !== SAVE_PREFIX + me.nick.toLowerCase()) { res.writeHead(403, ISOLATION).end(); return; }
   if (mSave) {
     const f = path.join(OUT, 'saves', mSave[1] + '.zip'), H = { ...ISOLATION, 'Cache-Control': 'no-store' };
     if (req.method === 'PUT') {
