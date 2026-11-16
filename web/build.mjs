@@ -32,7 +32,7 @@ for (const [k, v] of Object.entries(opts.entryPoints)) if (!fs.existsSync(v)) de
 // WC3: until the player's page exists (index.html and src/app's shell), only the host, its workers and the test
 // pages are built; nfsu2-web's main.ts and play page import app modules this port left out.
 const HAVE_APP = fs.existsSync('index.html');
-if (!HAVE_APP) for (const k of ['main', 'sw', 'test/play', 'test/aicheck']) delete opts.entryPoints[k];
+if (!HAVE_APP) for (const k of ['main', 'sw', 'test/play', 'test/aicheck', 'host/predownload-worker']) delete opts.entryPoints[k];
 
 // test pages and source maps go to dist-dev (same relative path: /test/x.js, /main.js.map); the rest to dist
 const devOnly = rel => rel.startsWith('test/') || rel.endsWith('.map');
@@ -51,8 +51,6 @@ fs.mkdirSync(path.join(DEV, 'test'), { recursive: true });
 fs.mkdirSync(DIST, { recursive: true });
 // the player's loading overlay on the game's page (loading.js, a classic script before hostcheck.js)
 fs.copyFileSync('loading.js', path.join(DEV, 'test', 'loading.js'));
-// the games hub's view of this game in the browser (gabrhelovi.cz embeds it: downloaded data, predownload)
-fs.copyFileSync('hub-status.html', path.join(DEV, 'hub-status.html'));
 // the start page (its script and stylesheet are main.js / main.css), and its files as they are (src/static: the
 // app's manifest and icons, for installing it on a phone's home screen or as a desktop app)
 if (HAVE_APP) {

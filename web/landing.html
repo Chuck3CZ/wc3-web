@@ -204,7 +204,7 @@
           <button type="button" class="chip" id="sy-exp" data-t="sy_exp"></button> <button type="button" class="chip" id="sy-imp" data-t="sy_imp"></button>
           <input type="file" id="sy-file" accept=".zip,application/zip" hidden></div>
         <div class="cinfo" id="cache-info" aria-live="polite"></div>
-        <div class="cbox"><button type="button" class="chip" id="cache-clear" data-t="cc_btn"></button> <button type="button" class="chip" id="cache-stale" data-t="st_clear" hidden></button></div>
+        <div class="cbox"><button type="button" class="chip" id="cache-clear" data-t="cc_btn"></button></div>
       </details>
       <button class="go" id="go" type="submit" data-t="play"></button>
       <p class="hint"><span data-g="dlnote"></span> <button type="button" class="linklike" id="force" hidden data-t="force"></button></p>
@@ -265,7 +265,7 @@
 <script>
 'use strict';
 const GAME = {
-  id: 'wc3', storeKey: 'wc3-name', savePrefix: 'p-', wasm: '/wc3.wasm', exe: '/data/war3.exe', pages: 20480, touch: false, predownload: true, sync: true,
+  id: 'wc3', storeKey: 'wc3-name', savePrefix: 'p-', wasm: '/wc3.wasm', exe: '/data/war3.exe', pages: 20480, touch: false, predownload: false, sync: true,
   name: ['Warcraft III: The Frozen Throne v prohlížeči', 'Warcraft III: The Frozen Throne in the browser'],
   eyebrow: ['Fanouškovský projekt · WebAssembly + WebGPU', 'Fan project · WebAssembly + WebGPU'],
   titleParts: [['Warcraft III: ', 'Warcraft III: '], ['The Frozen Throne', 'The Frozen Throne']],
@@ -312,7 +312,7 @@ const UI = {
     res: 'Rozlišení obrazu', resauto: 'Podle obrazovky (doporučeno)', reshint: 'Nižší rozlišení je méně náročné na grafiku.',
     touch: 'Dotykové ovládání', touchauto: 'Automaticky', touchon: 'Zapnout', touchoff: 'Vypnout', touchhint: 'Tlačítka přes hru pro telefon a tablet. Automaticky se zapnou jen na dotykovém zařízení.',
     adv: 'Pokročilé a ladění', o_showlog: 'Zobrazit log pod hrou', o_showlog_h: 'Běžně je skrytý.', o_logpost: 'Zapisovat log na server', o_logpost_h: 'Pro hlášení chyb: log si pak přečte provozovatel serveru.',
-    o_noload: 'Bez načítacího překryvu', o_noload_h: 'Stránka hry se spustí jako dřív, bez kroků načítání.', o_nocache: 'Neukládat modul do paměti prohlížeče', o_nocache_h: 'Modul se vždy stáhne znovu.', skipped: 'přeskočeno', o_bg: 'Nechat hru běžet i na skryté kartě', o_bg_h: 'Zkušební: dlouhé načítání se nezastaví, když přepneš jinam. Prohlížeč ale skryté kartě ubírá výkon.', sy_h: 'Postup hry (tvůj profil a uložené hry):', sy_pull: 'Stáhnout ze serveru', sy_push: 'Poslat na server', sy_exp: 'Uložit do souboru', sy_imp: 'Nahrát ze souboru', sy_have: 'V prohlížeči je postup, souborů:', sy_srv: 'na serveru z', sy_nolocal: 'V tomto prohlížeči zatím není žádný postup.', sy_noserver: 'Na serveru zatím není.', sy_pulled: 'Postup stažen ze serveru, souborů:', sy_pushed: 'Postup poslán na server, souborů:', sy_newer: 'Na serveru je novější postup (Stáhnout ze serveru).', sy_down: 'Server tyhle postupy neukládá.', sy_big: 'Postup je příliš velký (limit 16 MB).', sy_fail: 'Postup se nepovedlo přenést.', sy_need: 'Zadej nejdřív jméno hráče.', sy_saved: 'Uloženo do souboru, souborů:', sy_imported: 'Nahráno ze souboru, souborů:', cc_btn: 'Smazat uložený modul', cc_none: 'Nic není uloženo.', cc_has: 'Uloženo v prohlížeči:', cc_done: 'Smazáno. Příští start stáhne modul znovu. Uložené hry a profily zůstaly.', cc_fail: 'Smazání se nepovedlo.', cc_mod: 'Modul hry v paměti', cc_site: 'Úložiště stránky v prohlížeči', cc_of: 'z', cc_in: 'z toho', cc_caches: 'cache', cc_files: 'souborové úložiště (data hry, uložené hry)', cc_other: 'ostatní', cc_pers: 'Trvalé úložiště', cc_yes: 'ano', cc_no: 'ne: při nedostatku místa může prohlížeč cache smazat', cc_ver: 'verze', pre_h: 'Hra v tomto prohlížeči', st_data: 'Herní data stažená', st_stale: 'Staré kopie dat (na serveru už nejsou)', st_files: 'souborů', st_saves: 'Uložené hry a profily', st_other: 'ostatní', st_clear: 'Smazat staré kopie dat', st_cleared: 'Staré kopie dat smazány.', pre_have: 'Staženo', pre_left: 'zbývá', pre_go: 'Stáhnout hru předem', pre_cont: 'Pokračovat ve stahování', pre_stop: 'Zastavit',
+    o_noload: 'Bez načítacího překryvu', o_noload_h: 'Stránka hry se spustí jako dřív, bez kroků načítání.', o_nocache: 'Neukládat modul do paměti prohlížeče', o_nocache_h: 'Modul se vždy stáhne znovu.', skipped: 'přeskočeno', o_bg: 'Nechat hru běžet i na skryté kartě', o_bg_h: 'Zkušební: dlouhé načítání se nezastaví, když přepneš jinam. Prohlížeč ale skryté kartě ubírá výkon.', sy_h: 'Postup hry (tvůj profil a uložené hry):', sy_pull: 'Stáhnout ze serveru', sy_push: 'Poslat na server', sy_exp: 'Uložit do souboru', sy_imp: 'Nahrát ze souboru', sy_have: 'V prohlížeči je postup, souborů:', sy_srv: 'na serveru z', sy_nolocal: 'V tomto prohlížeči zatím není žádný postup.', sy_noserver: 'Na serveru zatím není.', sy_pulled: 'Postup stažen ze serveru, souborů:', sy_pushed: 'Postup poslán na server, souborů:', sy_newer: 'Na serveru je novější postup (Stáhnout ze serveru).', sy_down: 'Server tyhle postupy neukládá.', sy_big: 'Postup je příliš velký (limit 16 MB).', sy_fail: 'Postup se nepovedlo přenést.', sy_need: 'Zadej nejdřív jméno hráče.', sy_saved: 'Uloženo do souboru, souborů:', sy_imported: 'Nahráno ze souboru, souborů:', cc_btn: 'Smazat uložený modul', cc_none: 'Nic není uloženo.', cc_has: 'Uloženo v prohlížeči:', cc_done: 'Smazáno. Příští start stáhne modul znovu. Uložené hry a profily zůstaly.', cc_fail: 'Smazání se nepovedlo.', cc_mod: 'Modul hry v paměti', cc_site: 'Úložiště stránky v prohlížeči', cc_of: 'z', cc_in: 'z toho', cc_caches: 'cache', cc_files: 'uložené hry a profily', cc_other: 'ostatní', cc_pers: 'Trvalé úložiště', cc_yes: 'ano', cc_no: 'ne: při nedostatku místa může prohlížeč cache smazat', cc_ver: 'verze', pre_h: 'Hra v tomto prohlížeči', pre_have: 'Staženo', pre_left: 'zbývá', pre_go: 'Stáhnout hru předem', pre_cont: 'Pokračovat ve stahování', pre_stop: 'Zastavit',
     pre_done: 'Hotovo: celá hra je v tomto prohlížeči a nečeká na síť.', pre_err: 'Stahování se zastavilo:', pre_note: 'Zbývá stáhnout {n} (bez videí). Stahování jde přerušit a později pokračovat.',
     play: 'Hrát', force: 'Spustit i přesto', envh: 'Tvůj prohlížeč', ctlh: 'Ovládání', ctlbtn: 'Zobrazit ovládání', close: 'Zavřít',
     stath: 'Stav projektu', needh: 'Co potřebuješ', loading: 'Připravuji hru', cancel: 'Zrušit', back: 'Zpět',
@@ -336,7 +336,7 @@ const UI = {
     res: 'Picture resolution', resauto: 'Match the screen (recommended)', reshint: 'A lower resolution is easier on the graphics card.',
     touch: 'Touch controls', touchauto: 'Automatic', touchon: 'On', touchoff: 'Off', touchhint: 'Buttons over the game for phones and tablets. Automatic turns them on only on a touch device.',
     adv: 'Advanced and debugging', o_showlog: 'Show the log under the game', o_showlog_h: 'Hidden by default.', o_logpost: 'Write the log to the server', o_logpost_h: 'For bug reports: the server operator then reads the log.',
-    o_noload: 'No loading overlay', o_noload_h: 'The game page starts as it used to, without the loading steps.', o_nocache: 'Do not keep the module in the browser', o_nocache_h: 'The module is always downloaded again.', skipped: 'skipped', o_bg: 'Keep the game running in a hidden tab', o_bg_h: 'Experimental: a long load does not stop when you switch away. The browser still slows a hidden tab.', sy_h: 'Game progress (your profile and saved games):', sy_pull: 'Download from the server', sy_push: 'Send to the server', sy_exp: 'Save to a file', sy_imp: 'Load from a file', sy_have: 'This browser has progress, files:', sy_srv: 'on the server from', sy_nolocal: 'No progress in this browser yet.', sy_noserver: 'Not on the server yet.', sy_pulled: 'Progress downloaded from the server, files:', sy_pushed: 'Progress sent to the server, files:', sy_newer: 'The server has newer progress (Download from the server).', sy_down: 'This server does not keep progress.', sy_big: 'The progress is too large (limit 16 MB).', sy_fail: 'The progress could not be transferred.', sy_need: 'Enter the player name first.', sy_saved: 'Saved to a file, files:', sy_imported: 'Loaded from a file, files:', cc_btn: 'Clear the stored module', cc_none: 'Nothing is stored.', cc_has: 'Stored in the browser:', cc_done: 'Cleared. The next start downloads the module again. Saved games and profiles stay.', cc_fail: 'Clearing failed.', cc_mod: 'Game module stored', cc_site: 'This page\'s storage in the browser', cc_of: 'of', cc_in: 'of that', cc_caches: 'cache', cc_files: 'file storage (game data, saved games)', cc_other: 'other', cc_pers: 'Persistent storage', cc_yes: 'yes', cc_no: 'no: the browser may clear the cache when space runs short', cc_ver: 'version', pre_h: 'Game in this browser', st_data: 'Game data downloaded', st_stale: 'Old copies of data (no longer on the server)', st_files: 'files', st_saves: 'Saved games and profiles', st_other: 'other', st_clear: 'Delete old data copies', st_cleared: 'Old data copies deleted.', pre_have: 'Downloaded', pre_left: 'left', pre_go: 'Download the game ahead', pre_cont: 'Continue downloading', pre_stop: 'Stop',
+    o_noload: 'No loading overlay', o_noload_h: 'The game page starts as it used to, without the loading steps.', o_nocache: 'Do not keep the module in the browser', o_nocache_h: 'The module is always downloaded again.', skipped: 'skipped', o_bg: 'Keep the game running in a hidden tab', o_bg_h: 'Experimental: a long load does not stop when you switch away. The browser still slows a hidden tab.', sy_h: 'Game progress (your profile and saved games):', sy_pull: 'Download from the server', sy_push: 'Send to the server', sy_exp: 'Save to a file', sy_imp: 'Load from a file', sy_have: 'This browser has progress, files:', sy_srv: 'on the server from', sy_nolocal: 'No progress in this browser yet.', sy_noserver: 'Not on the server yet.', sy_pulled: 'Progress downloaded from the server, files:', sy_pushed: 'Progress sent to the server, files:', sy_newer: 'The server has newer progress (Download from the server).', sy_down: 'This server does not keep progress.', sy_big: 'The progress is too large (limit 16 MB).', sy_fail: 'The progress could not be transferred.', sy_need: 'Enter the player name first.', sy_saved: 'Saved to a file, files:', sy_imported: 'Loaded from a file, files:', cc_btn: 'Clear the stored module', cc_none: 'Nothing is stored.', cc_has: 'Stored in the browser:', cc_done: 'Cleared. The next start downloads the module again. Saved games and profiles stay.', cc_fail: 'Clearing failed.', cc_mod: 'Game module stored', cc_site: 'This page\'s storage in the browser', cc_of: 'of', cc_in: 'of that', cc_caches: 'cache', cc_files: 'saved games and profiles', cc_other: 'other', cc_pers: 'Persistent storage', cc_yes: 'yes', cc_no: 'no: the browser may clear the cache when space runs short', cc_ver: 'version', pre_h: 'Game in this browser', pre_have: 'Downloaded', pre_left: 'left', pre_go: 'Download the game ahead', pre_cont: 'Continue downloading', pre_stop: 'Stop',
     pre_done: 'Done: the whole game is in this browser and never waits on the network.', pre_err: 'The download stopped:', pre_note: '{n} left to download (without the videos). It can be stopped and continued later.',
     play: 'Play', force: 'Start anyway', envh: 'Your browser', ctlh: 'Controls', ctlbtn: 'Show controls', close: 'Close',
     stath: 'Project status', needh: 'What you need', loading: 'Getting the game ready', cancel: 'Cancel', back: 'Back',
@@ -591,48 +591,8 @@ async function cacheInfo() {
       }
     }
     if (navigator.storage && navigator.storage.persisted) line(t('cc_pers'), (await navigator.storage.persisted()) ? t('cc_yes') : t('cc_no'));
-    // what the file system part holds: the game data (cache/) by folder, copies of files the server no longer has
-    // (a changed file gets a new name), and the save folders
-    const o = await opfsBreakdown();
-    if (o) {
-      line(t('st_data'), big(o.have) + ' ' + t('cc_of') + ' ' + big(o.total) + (o.groups.length ? ' (' + o.groups.map(g => g.name + ' ' + big(g.have)).join(', ') + ')' : ''));
-      if (o.stale) { line(t('st_stale'), big(o.stale) + ' · ' + o.staleN + ' ' + t('st_files')); $('#cache-stale').hidden = false; }
-      else $('#cache-stale').hidden = true;
-      line(t('st_saves'), big(o.saves));
-    }
   } catch { /* the browser denies the numbers (private window): the button still works */ }
   box.textContent = ''; box.append(...lines);
-}
-// the origin private file system: cache/ against the server's manifest, and the other folders (saves, profiles)
-let opfsStale = [];
-async function opfsBreakdown() {
-  if (!navigator.storage || !navigator.storage.getDirectory) return null;
-  const root = await navigator.storage.getDirectory();
-  let files = [];
-  try { const r = await fetch('/data-manifest', { cache: 'no-cache' }); if (r.ok) files = (await r.json()).files.filter(f => !f.d).map(f => ({ path: f.p, size: f.s ?? 0, mtime: f.m ?? 0 })); } catch { /* offline */ }
-  const byKey = new Map(files.map(f => [preKey(f), f]));
-  const groups = new Map(); let have = 0, total = 0, stale = 0, saves = 0;
-  const groupOf = p => { const s = p.split('/'); return s.length > 1 ? s[0] : (/\.mpq$/i.test(p) ? p : t('st_other')); };
-  for (const f of files) { total += f.size; const g = groupOf(f.path); if (!groups.has(g)) groups.set(g, { name: g, have: 0 }); }
-  opfsStale = [];
-  async function dirSize(d) { let n = 0; for await (const [, h] of d.entries()) n += h.kind === 'file' ? (await h.getFile()).size : await dirSize(h); return n; }
-  for await (const [name, h] of root.entries()) {
-    if (h.kind !== 'directory') { saves += (await h.getFile()).size; continue; }
-    if (name !== 'cache') { saves += await dirSize(h); continue; }
-    for await (const [k, fh] of h.entries()) {
-      if (fh.kind !== 'file' || k.endsWith('.have')) continue;
-      const f = byKey.get(k);
-      if (!f) { stale += (await fh.getFile()).size; opfsStale.push(k); continue; }
-      let b = 0;
-      try {
-        const m = new Uint8Array(await (await (await h.getFileHandle(k + '.have')).getFile()).arrayBuffer());
-        for (let i = 0; i < m.length; i++) if (m[i]) b += Math.min(PRE_BLOCK, f.size - i * PRE_BLOCK);
-      } catch { /* no map: nothing counted */ }
-      have += b; groups.get(groupOf(f.path)).have += b;
-    }
-  }
-  const gl = [...groups.values()].filter(g => g.have > 0).sort((a, b) => b.have - a.have);
-  return { have, total, stale, staleN: opfsStale.length, saves, groups: gl };
 }
 $('#cache-clear').addEventListener('click', async () => {
   try { await caches.delete('wasm-v1'); store.set(GAME.id + '-bust', String(Date.now())); cacheNote = t('cc_done'); } catch { cacheNote = t('cc_fail'); }
@@ -640,14 +600,6 @@ $('#cache-clear').addEventListener('click', async () => {
   setTimeout(() => { cacheNote = ''; cacheInfo(); }, 6000);
 });
 $('#adv').addEventListener('toggle', cacheInfo);
-$('#cache-stale').addEventListener('click', async () => {
-  try {
-    const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('cache');
-    for (const k of opfsStale) { for (const n of [k, k + '.have']) try { await d.removeEntry(n); } catch { /* gone */ } }
-    cacheNote = t('st_cleared');
-  } catch { cacheNote = t('cc_fail'); }
-  await cacheInfo();
-});
 
 // ---- the game's data in this browser (CMR 2005 streams 2.9 GB as it plays): download it ahead ----
 // The predownload worker (/host/predownload-worker.js, src/host/predownload-worker.ts) writes the cache the game reads from
