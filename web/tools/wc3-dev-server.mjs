@@ -155,7 +155,7 @@ lan.on('connection', ws => {
     if (!isBinary) {
       let m; try { m = JSON.parse(String(data)); } catch { return; }
       if (m.t === 'hello' && !me) {
-        const name = String(m.name ?? 'player').slice(0, 32), old = ipNum(m.vip), held = old ? peers.get(old) : null;
+        const name = String(ws.hubNick ?? m.name ?? 'player').slice(0, 32), old = ipNum(m.vip), held = old ? peers.get(old) : null;
         if (held && held.replay && m.replay === 1 && typeof m.token === 'string' && m.token === held.token &&
             Number.isInteger(m.rx) && m.rx >= held.outBase && m.rx <= held.outBase + held.out.length) {
           // the same session again: the place was held (or its old link died without a close we heard)
@@ -214,12 +214,73 @@ lan.on('connection', ws => {
   });
 });
 
+// ---- accounts (the games hub hry.gabrhelovi.cz, rozcestnik/api/server.mjs) ----
+// --hub <url> (or HUB): everything but the start page needs a player the hub allows this game (GAME_ID), and the
+// player's name is the account's.  The hub is asked with the player's cookie (/api/me), the answer kept HUB_CACHE.
+// Without --hub (a dev machine) the server is open as before.  HUB_KEY (environment): the hub's key for activity.
+const HUB = (arg('--hub', process.env.HUB || '') || '').replace(/\/$/, '');
+const HUB_LOGIN = arg('--hub-login', process.env.HUB_LOGIN || 'https://hry.gabrhelovi.cz/');
+const HUB_KEY = process.env.HUB_KEY || '', GAME_ID = 'wc3', HUB_CACHE = 30_000;
+const hubSeen = new Map();            // the cookie -> { t, me }
+async function whoIs(req) {
+  if (!HUB) return null;
+  const m = /(?:^|;\s*)gs=([^;]+)/.exec(req.headers.cookie || ''); if (!m) return null;
+  const c = hubSeen.get(m[1]); if (c && Date.now() - c.t < HUB_CACHE) return c.me;
+  let me = null;
+  try { const r = await fetch(HUB + '/api/me', { headers: { cookie: 'gs=' + m[1] }, signal: AbortSignal.timeout(5000) }); if (r.ok) me = await r.json(); }
+  catch (e) { console.log('[hub] ' + e.message); if (c) return c.me; }        // the hub away: the last answer holds
+  if (hubSeen.size > 2000) hubSeen.clear();
+  hubSeen.set(m[1], { t: Date.now(), me }); return me;
+}
+const allowed = me => !!(me && me.games && me.games[GAME_ID]);
+const clientIp = req => String(req.headers['cf-connecting-ip'] || req.socket.remoteAddress || '');
+function hubRecord(r) {
+  if (!HUB || !HUB_KEY) return;
+  fetch(HUB + '/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Key': HUB_KEY }, body: JSON.stringify({ game: GAME_ID, ...r }) })
+    .catch(e => console.log('[hub] activity: ' + e.message));
+}
+// a player's time in the game: from the first presence report to the last (or the page's goodbye), with the address
+// it came from and the round trips its reports measured; printed (the container's log) and sent to the hub
+const plays = new Map();              // lower-case name -> { nick, start, seen, ip, country, ua, pings }
+function playSeen(nick, req, ping) {
+  const k = nick.toLowerCase(); let s = plays.get(k);
+  if (!s) {
+    s = { nick, start: Date.now(), seen: 0, ip: clientIp(req), country: String(req.headers['cf-ipcountry'] || ''), ua: String(req.headers['user-agent'] || '').slice(0, 160), pings: [] };
+    plays.set(k, s);
+    console.log(`[play] ${nick} started from ${s.ip}${s.country ? ' (' + s.country + ')' : ''}`);
+    hubRecord({ nick, ev: 'start', ip: s.ip, country: s.country, ua: s.ua, start: s.start });
+  }
+  s.seen = Date.now();
+  if (Number.isFinite(ping) && ping > 0 && ping < 60e3) { s.pings.push(Math.round(ping)); if (s.pings.length > 500) s.pings.shift(); }
+}
+function playEnd(k, why) {
+  const s = plays.get(k); if (!s) return;
+  plays.delete(k);
+  const pingMax = s.pings.length ? Math.max(...s.pings) : 0, pingAvg = s.pings.length ? Math.round(s.pings.reduce((a, b) => a + b, 0) / s.pings.length) : 0;
+  const end = why === 'left' ? Date.now() : s.seen;
+  console.log(`[play] ${s.nick} ended (${why}) after ${Math.round((end - s.start) / 60000)} min, ping max ${pingMax} / avg ${pingAvg} ms`);
+  hubRecord({ nick: s.nick, ev: 'end', ip: s.ip, country: s.country, start: s.start, end, pingMax, pingAvg });
+}
+setInterval(() => { const now = Date.now(); for (const [k, s] of plays) if (now - s.seen > PRESENCE_TTL) playEnd(k, 'no report'); }, 30_000).unref();
+
 const PRESENCE_TTL = 150_000;         // the pages report every 20 s (a hidden tab maybe once a minute); a closed one says so
 const presence = new Map();           // lower-case name -> { name, since, seen }
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   // a request line that is not a path ("//", a bad %-escape) must not take the server down
   let url, p;
   try { url = new URL(req.url, 'http://x'); p = decodeURIComponent(url.pathname); } catch { res.writeHead(400, ISOLATION).end('bad request'); return; }
+  // the account (--hub): only the start page and /whoami without one the hub allows this game
+  const me = await whoIs(req);
+  if (p === '/whoami') {
+    res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      .end(JSON.stringify({ hub: !!HUB, login: HUB_LOGIN, me: me ? { nick: me.nick, ok: allowed(me) } : null }));
+    return;
+  }
+  if (HUB && p !== '/' && !allowed(me)) {
+    if (p.startsWith('/hra/') || p.startsWith('/test/') || /text\/html/.test(req.headers.accept || '')) { res.writeHead(302, { ...ISOLATION, Location: '/' }).end(); return; }
+    res.writeHead(me ? 403 : 401, { ...ISOLATION, 'Content-Type': 'application/json' }).end(JSON.stringify({ err: me ? 'not allowed' : 'login', login: HUB_LOGIN }));
+    return;
+  }
   // the test page's log (hostcheck.ts ?logpost): out/browser.log, started over by a new run
   // the test page's screenshot (hostcheck.ts ?gpu&shot=N): out/shot.png, replaced each time
   if (req.method === 'POST' && p === '/shot') {
@@ -249,11 +310,11 @@ const server = http.createServer((req, res) => {
       req.on('data', d => { body += d; if (body.length > 1024) req.destroy(); });
       req.on('end', () => {
         try {
-          const m = JSON.parse(body), name = String(m.name ?? '');
+          const m = JSON.parse(body), name = me ? me.nick : String(m.name ?? '');     // with accounts: the account's name
           if (/^[A-Za-z0-9_-]{2,15}$/.test(name)) {
             const k = name.toLowerCase(), was = presence.get(k);
-            if (m.gone) presence.delete(k);
-            else if (was || presence.size < 500) presence.set(k, { name, since: was?.since ?? Date.now(), seen: Date.now() });
+            if (m.gone) { presence.delete(k); playEnd(k, 'left'); }
+            else if (was || presence.size < 500) { presence.set(k, { name, since: was?.since ?? Date.now(), seen: Date.now() }); playSeen(name, req, +m.ping); }
           }
         } catch { /* not ours */ }
         res.writeHead(204, ISOLATION).end();
@@ -268,8 +329,9 @@ const server = http.createServer((req, res) => {
     return;
   }
   // player progress, one zip per player (the start page's "Game progress"): /saves/<key>, key = the save folder's name.
-  // Whoever knows the name can read and replace it (no password): the server is for friends.
+  // Without accounts whoever knows the name can read and replace it; with them (--hub) only its player.
   const mSave = /^\/saves\/([a-z0-9_-]{1,60})$/.exec(p);
+  if (mSave && HUB && mSave[1] !== 'p-' + me.nick.toLowerCase()) { res.writeHead(403, ISOLATION).end(); return; }
   if (mSave) {
     const f = path.join(OUT, 'saves', mSave[1] + '.zip'), H = { ...ISOLATION, 'Cache-Control': 'no-store' };
     if (req.method === 'PUT') {
@@ -311,9 +373,11 @@ const server = http.createServer((req, res) => {
   }
   res.writeHead(404, ISOLATION).end('not found');
 });
-server.on('upgrade', (req, sock, head) => {
+server.on('upgrade', async (req, sock, head) => {
   let lanPath = ''; try { lanPath = new URL(req.url, 'http://x').pathname; } catch { /* bad */ }
   if (lanPath !== '/lan') return sock.destroy();
-  lan.handleUpgrade(req, sock, head, ws => lan.emit('connection', ws, req));
+  const me = await whoIs(req);
+  if (HUB && !allowed(me)) { sock.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); return; }
+  lan.handleUpgrade(req, sock, head, ws => { if (me) ws.hubNick = me.nick; lan.emit('connection', ws, req); });
 });
-server.listen(PORT, HOST, () => console.log(`[dev-server] http://${HOST}:${PORT}/`));
+server.listen(PORT, HOST, () => console.log(`[dev-server] http://${HOST}:${PORT}/${HUB ? ` (accounts: ${HUB}${HUB_KEY ? ', activity on' : ''})` : ''}`));

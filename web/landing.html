@@ -171,6 +171,7 @@
         <input id="name" type="text" maxlength="15" autocomplete="nickname" autocapitalize="off" spellcheck="false" required pattern="[A-Za-z0-9_\-]{2,15}">
         <p class="hint" data-t="namehint"></p>
         <p class="err" id="err" role="alert"></p>
+        <p class="hint" id="acct-note" aria-live="polite"></p>
       </div>
       <div class="field">
         <label for="res" data-t="res"></label>
@@ -324,7 +325,7 @@ const UI = {
     c_br: 'Prohlížeč', c_br_warn: 'Hra je testovaná v Chrome a Edge. Jiný prohlížeč nemusí fungovat.',
     c_ptr: 'Myš a klávesnice', c_ptr_warn: 'Vypadá to na dotykové zařízení bez myši. Hra se ovládá myší a klávesnicí.',
     checking: 'kontroluji…',
-    s_mod: 'Modul hry', s_data: 'Herní data na serveru', s_up: 'aktualizováno', s_ok: 'k dispozici', s_no: 'nedostupná', s_online: 'Hráči online', s_lan: 'připojen k LAN', s_since: 'od', s_nobody: 'Teď nikdo nehraje.', s_modmatch: 'odpovídá stránce', s_stored: 'Modul v tomto prohlížeči', st_checking: 'ověřuji…', st_none: 'není uložený, stáhne se při spuštění', st_have: 'uložený', st_ok: 'uložený, ověřený (souhlasí se serverem)', st_bad: 'uložený, ale POŠKOZENÝ – při spuštění se stáhne znovu', st_old: 'uložená starší verze – při spuštění se stáhne nová', st_unknown: 'nelze zjistit', s_modbad: 'jiná verze než stránka, hra by se nevykreslovala (dej vědět správci)', s_srv: 'Server neodpovídá. Je stránka otevřená z hostitelského serveru?',
+    s_mod: 'Modul hry', s_data: 'Herní data na serveru', s_up: 'aktualizováno', s_ok: 'k dispozici', s_no: 'nedostupná', ac_as: 'Hraješ jako {n} (účet z rozcestníku).', ac_login: 'Hrát můžou jen přihlášení hráči. Přihlas se nebo si založ účet na ', ac_wait: 'Účet {n} zatím nemá povolený Warcraft III. Až ho správce povolí, obnov stránku.', ac_srv: 'Stav serveru uvidíš po přihlášení.', s_online: 'Hráči online', s_lan: 'připojen k LAN', s_since: 'od', s_nobody: 'Teď nikdo nehraje.', s_modmatch: 'odpovídá stránce', s_stored: 'Modul v tomto prohlížeči', st_checking: 'ověřuji…', st_none: 'není uložený, stáhne se při spuštění', st_have: 'uložený', st_ok: 'uložený, ověřený (souhlasí se serverem)', st_bad: 'uložený, ale POŠKOZENÝ – při spuštění se stáhne znovu', st_old: 'uložená starší verze – při spuštění se stáhne nová', st_unknown: 'nelze zjistit', s_modbad: 'jiná verze než stránka, hra by se nevykreslovala (dej vědět správci)', s_srv: 'Server neodpovídá. Je stránka otevřená z hostitelského serveru?',
     l_chk: 'Kontrola prohlížeče', l_mod: 'Stažení modulu hry', l_data: 'Připojení k herním datům', l_go: 'Spuštění hry',
     l_sub0: 'Chvilku strpení…', l_sub_mod: 'Stahuji modul hry. Příště se načte z paměti prohlížeče.', l_sub_go: 'Otevírám hru. Další načítání uvidíš na její stránce.',
     l_err_mod: 'Modul se nepodařilo stáhnout.', l_err_modbad: 'Stažený modul je poškozený (nesouhlasí kontrolní součet). Zkus to znovu, případně v Pokročilém smaž uložený modul.', l_err_modsrv: 'Server posílá jinou verzi modulu hry, než ke které patří tahle stránka. Hra by se nevykreslovala správně – dej vědět správci serveru.', mod_redo: 'uložený modul byl poškozený nebo starý – stahuji znovu', mod_ok: 'ověřeno', l_err_data: 'Herní data na serveru nejsou dostupná.',
@@ -348,7 +349,7 @@ const UI = {
     c_br: 'Browser', c_br_warn: 'The game is tested in Chrome and Edge. Another browser may not work.',
     c_ptr: 'Mouse and keyboard', c_ptr_warn: 'This looks like a touch device without a mouse. The game is played with mouse and keyboard.',
     checking: 'checking…',
-    s_mod: 'Game module', s_data: 'Game data on the server', s_up: 'updated', s_ok: 'available', s_no: 'unavailable', s_online: 'Players online', s_lan: 'on the LAN', s_since: 'since', s_nobody: 'Nobody is playing right now.', s_modmatch: 'matches this page', s_stored: 'Module in this browser', st_checking: 'checking…', st_none: 'not stored, downloaded at start', st_have: 'stored', st_ok: 'stored, verified (matches the server)', st_bad: 'stored but DAMAGED: downloaded again at start', st_old: 'an older version stored: the new one is downloaded at start', st_unknown: 'cannot tell', s_modbad: 'a different version than this page, the game would not draw (tell the operator)', s_srv: 'The server does not answer. Is this page opened from the host server?',
+    s_mod: 'Game module', s_data: 'Game data on the server', s_up: 'updated', s_ok: 'available', s_no: 'unavailable', ac_as: 'Playing as {n} (the account from the games hub).', ac_login: 'Only signed-in players can play. Sign in or create an account at ', ac_wait: 'The account {n} is not allowed Warcraft III yet. Reload the page once the admin allows it.', ac_srv: 'The server status shows after you sign in.', s_online: 'Players online', s_lan: 'on the LAN', s_since: 'since', s_nobody: 'Nobody is playing right now.', s_modmatch: 'matches this page', s_stored: 'Module in this browser', st_checking: 'checking…', st_none: 'not stored, downloaded at start', st_have: 'stored', st_ok: 'stored, verified (matches the server)', st_bad: 'stored but DAMAGED: downloaded again at start', st_old: 'an older version stored: the new one is downloaded at start', st_unknown: 'cannot tell', s_modbad: 'a different version than this page, the game would not draw (tell the operator)', s_srv: 'The server does not answer. Is this page opened from the host server?',
     l_chk: 'Browser check', l_mod: 'Downloading the game module', l_data: 'Connecting to the game data', l_go: 'Starting the game',
     l_sub0: 'One moment…', l_sub_mod: 'Downloading the module. Next time it loads from the browser cache.', l_sub_go: 'Opening the game. You will see the rest of the loading on its page.',
     l_err_mod: 'The module could not be downloaded.', l_err_modbad: 'The downloaded module is damaged (checksum mismatch). Try again, or clear the stored module under Advanced.', l_err_modsrv: 'The server sends a different game module than this page belongs to. The game would not draw properly: tell the server operator.', mod_redo: 'the stored module was damaged or old: downloading again', mod_ok: 'verified', l_err_data: 'The game data on the server is not available.',
@@ -424,6 +425,7 @@ async function probe() {
   srv = { ok: false };
   try {
     const r = await fetch(GAME.wasm, { method: 'HEAD' });
+    if (r.status === 401 || r.status === 403) srv = { ok: false, auth: true };
     if (r.ok) {
       modEtag = r.headers.get('etag') || r.headers.get('last-modified') || '';
       srv = { ok: true, size: +r.headers.get('content-length') || 0, mod: r.headers.get('last-modified') ? new Date(r.headers.get('last-modified')) : null };
@@ -464,7 +466,7 @@ async function checkStored() {
 function drawSrv() {
   const box = $('#srv'); box.textContent = '';
   if (!srv) return;
-  if (!srv.ok) { box.append(el('span', t('s_srv'))); return; }
+  if (!srv.ok) { box.append(el('span', t(srv.auth ? 'ac_srv' : 's_srv'))); return; }
   const row = (k, v, dot) => { const d = el('div'); if (dot) d.append(el('span', null, 'dot ' + dot)); d.append(k + ': ', el('b', v)); box.append(d); };
   const when = srv.mod ? ', ' + t('s_up') + ' ' + srv.mod.toLocaleString(lang === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : '';
   const rev = srv.rev || (srv.match && srv.want && srv.want.rev) || '';
@@ -766,6 +768,22 @@ $('#res').value = store.get(GAME.id + '-res') || '';
 $('#touch').value = store.get(GAME.id + '-touch') || '';
 try { const sv = JSON.parse(store.get(GAME.id + '-opts') || '{}'); for (const k of OPTS) $('#o-' + k).checked = !!sv[k]; } catch {}
 if (/[?&]debug/.test(location.search)) $('#adv').open = true;
+// ---- účet z rozcestníku (/whoami): na serveru s účty hraje jen schválený hráč, a to pod jménem z účtu ----
+let acct = { hub: false };
+async function account() {
+  try { const r = await fetch('/whoami', { cache: 'no-store' }); if (r.ok) acct = await r.json(); } catch {}
+  if (!acct.hub) return;
+  const box = $('#acct-note'); box.textContent = '';
+  name.readOnly = true;
+  name.value = acct.me ? acct.me.nick : '';
+  if (acct.me && acct.me.ok) box.textContent = t('ac_as').replace('{n}', acct.me.nick);
+  else {
+    $('#go').disabled = true;
+    if (acct.me) box.textContent = t('ac_wait').replace('{n}', acct.me.nick);
+    else { const a = el('a', new URL(acct.login).host); a.href = acct.login; box.append(t('ac_login'), a, '.'); }
+  }
+  syMsg = ''; syAuto(); probe();
+}
 // ---- postup hráče: složka v prohlížeči (OPFS) <-> zip <-> server (/saves/<klíč>) ----
 const syKey = n => GAME.savePrefix + n.toLowerCase();
 const syName = () => { const n = name.value.trim(); return /^[A-Za-z0-9_-]{2,15}$/.test(n) ? n : ''; };
@@ -898,6 +916,7 @@ $('#force').addEventListener('click', () => { forced = true; $('#f').requestSubm
 $('#f').addEventListener('submit', e => {
   e.preventDefault();
   const n = name.value.trim();
+  if (acct.hub && !(acct.me && acct.me.ok)) { err.textContent = acct.me ? t('ac_wait').replace('{n}', acct.me.nick) : t('ac_login') + new URL(acct.login).host; return; }
   if (!/^[A-Za-z0-9_-]{2,15}$/.test(n)) { err.textContent = t('badname'); name.focus(); return; }
   err.textContent = '';
   store.set(GAME.id + '-opts', JSON.stringify(optsGet()));
@@ -913,6 +932,7 @@ syBind();
 syAuto();
 runChecks();
 probe();
+account();
 preInit();
 </script>
 </body>

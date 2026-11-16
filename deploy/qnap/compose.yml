@@ -3,6 +3,8 @@
 #   WC3_MODULE=/share/CACHEDEV1_DATA/wc3/module   the folder with wc3.wasm
 #   WC3_LOGS=/share/CACHEDEV1_DATA/wc3/logs       the test pages' logs (browser.log, shot.png)
 #   WC3_PORT=8086                                 8080 is QTS's own
+#   WC3_HUB=http://192.168.16.16:8085              the games hub (accounts); empty: open
+#   WC3_HUB_KEY=...                               the hub's data/hub.key (activity records)
 #   TUNNEL_TOKEN=...                              only for the tunnel profile
 # then:  docker compose up -d --build            (and with HTTPS from Cloudflare: docker compose --profile tunnel up -d)
 services:
@@ -15,6 +17,11 @@ services:
       - ${WC3_GAME:?set WC3_GAME in .env}:/game:ro
       - ${WC3_MODULE:?set WC3_MODULE in .env}:/module:ro
       - ${WC3_LOGS:?set WC3_LOGS in .env}:/logs
+    # player accounts (the games hub, its api/server.mjs): WC3_HUB=http://<NAS>:8085, WC3_HUB_KEY = its data/hub.key;
+    # empty: no accounts, the server open as before
+    environment:
+      HUB: ${WC3_HUB:-}
+      HUB_KEY: ${WC3_HUB_KEY:-}
     logging: { driver: json-file, options: { max-size: 10m, max-file: "3" } }
   # HTTPS for the players (WebGPU and the game's threads need a secure page): a Cloudflare Tunnel, its public
   # hostname's service http://server:8086 (Cloudflare Zero Trust, Networks, Tunnels)

@@ -31,8 +31,12 @@ if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'di
            hint.textContent = `${resW}×${resH} (?res=ŠxV). Celou obrazovku opustíš podržením Esc.`;
            document.body.append(fs, hint, syncNote); }
 if (me) {
-  const here = (gone = false) => { const body = JSON.stringify(gone ? { name: me, gone: 1 } : { name: me });
-    if (gone) navigator.sendBeacon('/presence', body); else fetch('/presence', { method: 'POST', body, keepalive: true }).catch(() => {}); };
+  // each report carries the round trip the previous one took (the server keeps the worst and the average per game)
+  let rtt = 0;
+  const here = (gone = false) => { const body = JSON.stringify(gone ? { name: me, gone: 1 } : { name: me, ...(rtt ? { ping: rtt } : {}) });
+    if (gone) { navigator.sendBeacon('/presence', body); return; }
+    const t0 = performance.now();
+    fetch('/presence', { method: 'POST', body, keepalive: true }).then(() => { rtt = Math.round(performance.now() - t0); }, () => {}); };
   const draw = (ps: { name: string; lan: boolean }[]) => {
     who.textContent = '';
     const h = document.createElement('div'); h.style.cssText = 'font-weight:600;color:#f0c674;margin-bottom:6px';
