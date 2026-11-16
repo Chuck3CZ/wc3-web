@@ -277,7 +277,10 @@ const server = http.createServer((req, res) => {
       req.on('data', d => { n += d.length; if (n > 16e6) { bad = true; req.destroy(); } else parts.push(d); });
       req.on('end', () => {
         if (bad) return;
-        try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f + '.tmp', Buffer.concat(parts)); fs.renameSync(f + '.tmp', f); console.log(`[saves] ${mSave[1]}: ${n} bytes`); res.writeHead(204, H).end(); }
+        try { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f + '.tmp', Buffer.concat(parts)); fs.renameSync(f + '.tmp', f);
+          // X-Saves-Mtime: the newest file in it (ms), so the copy is as old as the progress and not newer than the browser's
+          const mt = +req.headers['x-saves-mtime']; if (mt > 0 && mt <= Date.now() + 60e3) fs.utimesSync(f, new Date(), new Date(mt));
+          console.log(`[saves] ${mSave[1]}: ${n} bytes`); res.writeHead(204, H).end(); }
         catch (e) { console.log('[saves] ' + e.message); res.writeHead(500, H).end(); }
       });
       req.on('close', () => { if (bad && !res.headersSent) { try { res.writeHead(413, H).end(); } catch { /* gone */ } } });

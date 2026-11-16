@@ -5,6 +5,7 @@ import { attachNet } from '../net/index';
 import { attachRenderer } from '../gpu/index';
 import { attachInput } from '../input/index';
 import { attachAudio } from '../audio/index';
+import { startSaveSync, type SaveSync } from '../host/savesync';
 // the short address /hra/<name>: its parameters set by the page's first script (build.mjs BOOT); without them it is on its way back
 if ((window as any).__redir) await new Promise(() => {});
 const q: URLSearchParams = (window as any).__q ?? new URLSearchParams(location.search);
@@ -18,6 +19,8 @@ const fs = document.createElement('button');
 // ?net=<name>: the player; the page tells the server it is here (POST /presence) and lists who else is, beside the game
 const me = q.get('net') ?? '';
 const who = document.createElement('aside');
+// the progress on its way to the server (savesync.ts), beside the fullscreen button
+const syncNote = document.createElement('span'); syncNote.style.cssText = 'margin-left:14px;font:13px system-ui,sans-serif;color:#8a8';
 if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'display:block;flex:0 1 1280px;min-width:0;max-width:100%;background:#000';
            const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap';
            who.style.cssText = 'flex:0 0 170px;font:13px system-ui,sans-serif;color:#ccc;background:#15171c;border:1px solid #2a2e36;border-radius:6px;padding:8px 10px';
@@ -26,7 +29,7 @@ if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'di
            fs.onclick = () => { canvas.requestFullscreen({ navigationUI: 'hide' }).then(() => canvas.focus(), e => console.log('fullscreen: ' + e)); };
            const hint = document.createElement('span'); hint.style.cssText = 'margin-left:10px;font:13px system-ui,sans-serif;color:#666';
            hint.textContent = `${resW}×${resH} (?res=ŠxV). Celou obrazovku opustíš podržením Esc.`;
-           document.body.append(fs, hint); }
+           document.body.append(fs, hint, syncNote); }
 if (me) {
   const here = (gone = false) => { const body = JSON.stringify(gone ? { name: me, gone: 1 } : { name: me });
     if (gone) navigator.sendBeacon('/presence', body); else fetch('/presence', { method: 'POST', body, keepalive: true }).catch(() => {}); };
@@ -92,11 +95,16 @@ if (script) {
   await w.write(txt); await w.close();
   env.NFSU2_INPUT_SCRIPT = '/save/autotest-script.txt';
 }
+// a player's folder (the start page's p-<name>) goes to the server each time the game saves into it
+const saveDir = q.get('save') ?? '';
+let sync: SaveSync | null = null;
+if (me && /^p-[a-z0-9_-]{2,15}$/.test(saveDir)) sync = startSaveSync(saveDir, log, s => { syncNote.textContent = s; });
 const p = await startProcess({
   module: mod, pool: +(q.get('pool') ?? 24), initialPages: +(q.get('pages') ?? 1024),
   cfg: { args: ['nfsu2', ...(q.getAll('arg'))], env: { HOME: '/save', NFSU2_DATA: '/data', ...env, ...Object.fromEntries(q.getAll('env').map(e => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)])) }, dataBase: '/data/', manifestUrl: '/data-manifest', saveDir: q.get('save') ?? 'save-test' },
   onLog: (s, fd, tid) => log(`[${tid}${fd === 2 ? '!' : ''}] ${s}`),
   onNote: log,
+  onSaved: path => sync?.saved(path),
 });
 if (gpu) {
   try {

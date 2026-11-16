@@ -840,7 +840,7 @@ async function syPush(n, loc) {
   if (!loc.length) { syMsg = t('sy_nolocal'); return false; }
   const blob = zipMake(loc);
   if (blob.size > 16e6) { syMsg = t('sy_big'); return false; }
-  const r = await fetch('/saves/' + syKey(n), { method: 'PUT', body: blob });
+  const r = await fetch('/saves/' + syKey(n), { method: 'PUT', body: blob, headers: { 'X-Saves-Mtime': String(loc.reduce((m, f) => Math.max(m, f.mtime || 0), 0)) } });
   if (!r.ok) { syMsg = t('sy_down'); return false; }
   syMsg = t('sy_pushed') + ' ' + loc.length + ' · ' + syKb(blob.size); return true;
 }
