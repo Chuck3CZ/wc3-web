@@ -222,13 +222,14 @@ const HUB = (arg('--hub', process.env.HUB || '') || '').replace(/\/$/, '');
 const HUB_LOGIN = arg('--hub-login', process.env.HUB_LOGIN || 'https://hry.gabrhelovi.cz/');
 const HUB_KEY = process.env.HUB_KEY || '', GAME_ID = 'wc3', HUB_CACHE = 30_000;
 const hubSeen = new Map();            // the cookie -> { t, me }
+let hubDown = 0;                      // when the hub last did not answer (the start page says so instead of "sign in")
 async function whoIs(req) {
   if (!HUB) return null;
   const m = /(?:^|;\s*)gs=([^;]+)/.exec(req.headers.cookie || ''); if (!m) return null;
   const c = hubSeen.get(m[1]); if (c && Date.now() - c.t < HUB_CACHE) return c.me;
   let me = null;
-  try { const r = await fetch(HUB + '/api/me', { headers: { cookie: 'gs=' + m[1] }, signal: AbortSignal.timeout(5000) }); if (r.ok) me = await r.json(); }
-  catch (e) { console.log('[hub] ' + e.message); if (c) return c.me; }        // the hub away: the last answer holds
+  try { const r = await fetch(HUB + '/api/me', { headers: { cookie: 'gs=' + m[1] }, signal: AbortSignal.timeout(3000) }); if (r.ok) me = await r.json(); hubDown = 0; }
+  catch (e) { console.log(`[hub] ${HUB}: ${e.message}`); hubDown = Date.now(); if (c) return c.me; }   // the hub away: the last answer holds
   if (hubSeen.size > 2000) hubSeen.clear();
   hubSeen.set(m[1], { t: Date.now(), me }); return me;
 }
@@ -273,7 +274,7 @@ const server = http.createServer(async (req, res) => {
   const me = await whoIs(req);
   if (p === '/whoami') {
     res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-      .end(JSON.stringify({ hub: !!HUB, login: HUB_LOGIN, me: me ? { nick: me.nick, ok: allowed(me) } : null }));
+      .end(JSON.stringify({ hub: !!HUB, login: HUB_LOGIN, me: me ? { nick: me.nick, ok: allowed(me) } : null, ...(hubDown && Date.now() - hubDown < 60e3 ? { hubDown: 1 } : {}) }));
     return;
   }
   if (HUB && p !== '/' && !allowed(me)) {
