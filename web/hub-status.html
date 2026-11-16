@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>stav hry v prohlížeči</title>
+</head>
+<body>
+<script>
+'use strict';
+// The game's state in this browser for the games' hub page (gabrhelovi.cz), which embeds this page in a hidden
+// frame: how much of the game data is downloaded, and the download itself (the predownload worker, the same
+// cache the game reads from).  The hub and the games are subdomains of one site, so this frame sees the game's
+// own storage.
+//   hub -> frame: { t: 'status' } | { t: 'start' } | { t: 'stop' }
+//   frame -> hub: { t: 'state', state: 'idle'|'running'|'done'|'error'|'unavailable', have, total, rate, err }
+const HUB = /^https:\/\/([a-z0-9-]+\.)*gabrhelovi\.cz$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const BLOCK = 1 << 20;
+const keyOf = f => f.path.replace(/[^A-Za-z0-9._-]/g, '_') + '.' + f.size + '.' + f.mtime;
+// what the predownload fetches (web/landing.html preFiles, src/host/datacache.ts aheadFiles): all but the movies
+const aheadFiles = m => m.files.filter(f => !f.d && !/^(movies|langpacks|texpacks)$/i.test(f.p.split('/')[0]) && !/\.wmv$/i.test(f.p))
+  .map(f => ({ path: f.p, size: f.s ?? 0, mtime: f.m ?? 0 }));
+const S = { state: 'idle', have: 0, total: 0, rate: 0, err: '' };
+let parentOrigin = null, worker = null, samples = [];
+function send() { if (parentOrigin) parent.postMessage({ t: 'state', ...S }, parentOrigin); }
+async function scan() {
+  const r = await fetch('/data-manifest', { cache: 'no-cache' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const files = aheadFiles(await r.json());
+  let total = 0, have = 0, dir = null;
+  try { dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('cache'); } catch { /* nothing yet */ }
+  for (const f of files) {
+    total += f.size;
+    if (!dir) continue;
+    try {
+      const m = new Uint8Array(await (await (await dir.getFileHandle(keyOf(f) + '.have')).getFile()).arrayBuffer());
+      const nb = Math.ceil(f.size / BLOCK);
+      if (m.length === nb) for (let i = 0; i < nb; i++) if (m[i]) have += Math.min(BLOCK, f.size - i * BLOCK);
+    } catch { /* not cached */ }
+  }
+  S.have = have; S.total = total;
+  if (S.state !== 'running') S.state = total > 0 && have >= total ? 'done' : total > 0 ? 'idle' : 'unavailable';
+}
+function start() {
+  if (worker) return;
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch { /* the browser decides */ }
+  try { worker = new Worker('/host/predownload-worker.js', { type: 'module', name: 'predownload' }); }
+  catch (e) { S.state = 'error'; S.err = String(e && e.message || e); send(); return; }
+  S.state = 'running'; S.err = ''; samples = []; S.rate = 0;
+  worker.onmessage = e => {
+    const m = e.data;
+    if (m.t === 'progress') {
+      const now = performance.now(); samples.push({ t: now, have: m.have });
+      while (samples.length > 2 && now - samples[0].t > 10000) samples.shift();
+      const a = samples[0], span = (now - a.t) / 1000;
+      S.have = m.have; S.total = m.total; S.rate = span >= 2 ? (m.have - a.have) / span : 0;
+    } else if (m.t === 'done') { worker.terminate(); worker = null; S.state = 'done'; S.have = m.have; S.total = m.total; S.rate = 0; }
+    else if (m.t === 'error') { worker.terminate(); worker = null; S.state = 'error'; S.err = m.msg; S.rate = 0; }
+    else if (m.t === 'stopped') { worker.terminate(); worker = null; S.state = 'idle'; S.rate = 0; void scan().then(send, send); return; }
+    send();
+  };
+  worker.onerror = e => { if (worker) worker.terminate(); worker = null; S.state = 'error'; S.err = e.message || 'stopped'; S.rate = 0; send(); };
+  worker.postMessage({ t: 'start', manifestUrl: '/data-manifest', dataBase: '/data/', language: 'en', texpack: '' });
+  send();
+}
+function stop() { if (worker) worker.postMessage({ t: 'stop' }); }
+addEventListener('message', e => {
+  if (!HUB.test(e.origin) || !e.data || typeof e.data.t !== 'string') return;
+  parentOrigin = e.origin;
+  if (e.data.t === 'status') scan().then(send, err => { S.state = 'unavailable'; S.err = String(err && err.message || err); send(); });
+  else if (e.data.t === 'start') start();
+  else if (e.data.t === 'stop') stop();
+});
+</script>
+</body>
+</html>
