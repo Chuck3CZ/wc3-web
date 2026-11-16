@@ -66,12 +66,14 @@ if (fs.existsSync('src/app/lang')) for (const f of fs.readdirSync('src/app/lang'
 const LOADV = crypto.createHash('sha1').update(fs.readFileSync('loading.js')).digest('hex').slice(0, 8);
 // the short address /hra/<name> (the start page's Play): the parameters come from this tab's sessionStorage ('launch:<name>', put
 // there by the start page, kept through a reload); without them (a link from elsewhere) back to the start page with the name
+// the games hub's panel (players online, chat: rozcestnik site/overlay.js) on the game page too
+const HUBPANEL = `<script>(function(){var h='';try{h=localStorage.getItem('gabrhel-hub')||''}catch(e){}if(!h&&/(^|\\.)gabrhelovi\\.cz$/.test(location.hostname))h='https://hry.gabrhelovi.cz';if(!h)return;document.documentElement.dataset.hubGame='wc3';window.__hubPanel=1;var s=document.createElement('script');s.src=h+'/overlay.js';s.defer=true;document.head.append(s)})();</script>`;
 const BOOT = `<script>(function(){var m=\/^\\/hra\\/([A-Za-z0-9_-]{2,15})\\/?$\/.exec(location.pathname);if(!m)return;var s=null;
 `
   + `try{s=sessionStorage.getItem('launch:'+m[1].toLowerCase())}catch(e){}if(s){window.__q=new URLSearchParams(s);return}
 `
   + `window.__redir=1;location.replace('/?jmeno='+encodeURIComponent(m[1]))})()</script>`;
-const page = name => `<!doctype html><meta charset=utf-8><title>${name === 'hostcheck' ? 'Warcraft III' : name}</title>${name === 'hostcheck' ? BOOT + `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
+const page = name => `<!doctype html><meta charset=utf-8><title>${name === 'hostcheck' ? 'Warcraft III' : name}</title>${name === 'hostcheck' ? BOOT + HUBPANEL + `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck'].filter(n => opts.entryPoints['test/' + n])) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)
 fs.writeFileSync(path.join(DEV, 'test', 'dev.json'), '{"dev":true}\n');

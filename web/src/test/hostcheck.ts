@@ -18,13 +18,14 @@ const canvas = document.createElement('canvas');
 const fs = document.createElement('button');
 // ?net=<name>: the player; the page tells the server it is here (POST /presence) and lists who else is, beside the game
 const me = q.get('net') ?? '';
+const hubPanel = !!(window as any).__hubPanel;       // the hub's panel (build.mjs HUBPANEL) lists the players instead
 const who = document.createElement('aside');
 // the progress on its way to the server (savesync.ts), beside the fullscreen button
 const syncNote = document.createElement('span'); syncNote.style.cssText = 'margin-left:14px;font:13px system-ui,sans-serif;color:#8a8';
 if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'display:block;flex:0 1 1280px;min-width:0;max-width:100%;background:#000';
            const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap';
            who.style.cssText = 'flex:0 0 170px;font:13px system-ui,sans-serif;color:#ccc;background:#15171c;border:1px solid #2a2e36;border-radius:6px;padding:8px 10px';
-           row.append(canvas); if (me) row.append(who); document.body.append(row);
+           row.append(canvas); if (me && !hubPanel) row.append(who); document.body.append(row);
            fs.textContent = 'Celá obrazovka'; fs.style.cssText = 'margin:6px 0;font-size:14px';
            fs.onclick = () => { canvas.requestFullscreen({ navigationUI: 'hide' }).then(() => canvas.focus(), e => console.log('fullscreen: ' + e)); };
            const hint = document.createElement('span'); hint.style.cssText = 'margin-left:10px;font:13px system-ui,sans-serif;color:#666';
