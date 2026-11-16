@@ -8,7 +8,7 @@
 <title>Warcraft III: The Frozen Throne v prohlížeči</title>
 <meta name="description" content="Warcraft III: The Frozen Throne 1.26a přímo v prohlížeči. Fanouškovský projekt, WebAssembly a WebGPU.">
 <meta name="theme-color" content="#0b0e16">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111'/%3E%3Cpath d='M16 5l3 8 8 3-8 3-3 8-3-8-8-3 8-3z' fill='%23d9a441'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%E2%9A%94%EF%B8%8F%3C/text%3E%3C/svg%3E">
 <style>
   /* Jeden soubor bez závislostí: server posílá COEP require-corp, takže žádné externí písmo, obrázek ani skript. */
   :root { --bg: #0b0e16; --panel: #151a26; --text: #e8e6df; --muted: #9c9a92; --accent: #d9a441; --accent2: #f0c76a; --accent-ink: #1a1408;
@@ -140,6 +140,13 @@
   .keys span { color: var(--muted); }
 
   @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  /* icons on the buttons (the text comes from the language strings) */
+  #go::before { content: "▶\00a0\00a0"; }
+  #sy-pull::before { content: "⬇\00a0"; } #sy-push::before { content: "⬆\00a0"; }
+  #sy-exp::before { content: "💾\00a0"; } #sy-imp::before { content: "📂\00a0"; }
+  #cache-clear::before { content: "🗑\00a0"; } #pre-go::before { content: "⬇\00a0"; }
+  #ctl-open::before { content: "🎮\00a0"; } #cancel::before { content: "✕\00a0"; } #ctl-close::before { content: "✕\00a0"; }
+  #force::before { content: "⚠\00a0"; }
 </style>
 <script>(function(){var h='';try{h=localStorage.getItem('gabrhel-hub')||''}catch(e){}if(!h&&/(^|\.)gabrhelovi\.cz$/.test(location.hostname))h='https://hry.gabrhelovi.cz';if(!h)return;document.documentElement.dataset.hubGame='wc3';window.__hubPanel=1;var s=document.createElement('script');s.src=h+'/overlay.js';s.defer=true;document.head.append(s)})();</script>
 </head>

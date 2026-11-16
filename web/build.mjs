@@ -73,7 +73,9 @@ const BOOT = `<script>(function(){var m=\/^\\/hra\\/([A-Za-z0-9_-]{2,15})\\/?$\/
   + `try{s=sessionStorage.getItem('launch:'+m[1].toLowerCase())}catch(e){}if(s){window.__q=new URLSearchParams(s);return}
 `
   + `window.__redir=1;location.replace('/?jmeno='+encodeURIComponent(m[1]))})()</script>`;
-const page = name => `<!doctype html><meta charset=utf-8><title>${name === 'hostcheck' ? 'Warcraft III' : name}</title>${name === 'hostcheck' ? BOOT + HUBPANEL + `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
+// the game's symbol as the game page's icon (the start page has the same)
+const FAVICON = `<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='88'%3E%E2%9A%94%EF%B8%8F%3C/text%3E%3C/svg%3E">`;
+const page = name => `<!doctype html><meta charset=utf-8>${FAVICON}<title>${name === 'hostcheck' ? 'Warcraft III' : name}</title>${name === 'hostcheck' ? BOOT + HUBPANEL + `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck'].filter(n => opts.entryPoints['test/' + n])) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)
 fs.writeFileSync(path.join(DEV, 'test', 'dev.json'), '{"dev":true}\n');
