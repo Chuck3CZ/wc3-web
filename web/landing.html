@@ -610,7 +610,10 @@ async function launch(name, force) {
     setProgress(1);
     await new Promise(ok => setTimeout(ok, 350));
     if (sig.aborted) return;
-    location.href = gameUrl(name);
+    // a short address (/hra/<name>): the game page takes the parameters from this tab (build.mjs BOOT)
+    const full = gameUrl(name);
+    try { sessionStorage.setItem('launch:' + name.toLowerCase(), full.slice(full.indexOf('?') + 1)); location.href = '/hra/' + encodeURIComponent(name); }
+    catch { location.href = full; }
   } catch (e) {
     if (sig.aborted) return;
     fail([sChk, sMod, sData, sGo].find(li => li.className === 'cur') || sMod, 'l_err_mod');
@@ -758,6 +761,7 @@ $('#pre-go').addEventListener('click', () => { if (PRE.w) void preStop(); else p
 // ---- formulář ----
 const name = $('#name'), err = $('#err');
 name.value = store.get(GAME.storeKey) || '';
+{ const j = new URLSearchParams(location.search).get('jmeno'); if (j && /^[A-Za-z0-9_-]{2,15}$/.test(j)) name.value = j; }   // back from /hra/<name>
 $('#res').value = store.get(GAME.id + '-res') || '';
 $('#touch').value = store.get(GAME.id + '-touch') || '';
 try { const sv = JSON.parse(store.get(GAME.id + '-opts') || '{}'); for (const k of OPTS) $('#o-' + k).checked = !!sv[k]; } catch {}

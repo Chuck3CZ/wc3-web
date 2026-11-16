@@ -64,7 +64,14 @@ if (fs.existsSync('src/app/lang')) for (const f of fs.readdirSync('src/app/lang'
   fs.writeFileSync(path.join(DIST, 'lang', f), JSON.stringify(JSON.parse(fs.readFileSync(path.join('src/app/lang', f), 'utf8'))));
 // loading.js is named by its content (?v=): a browser or a proxy that kept an older one cannot run it for the new page
 const LOADV = crypto.createHash('sha1').update(fs.readFileSync('loading.js')).digest('hex').slice(0, 8);
-const page = name => `<!doctype html><meta charset=utf-8><title>${name}</title>${name === 'hostcheck' ? `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
+// the short address /hra/<name> (the start page's Play): the parameters come from this tab's sessionStorage ('launch:<name>', put
+// there by the start page, kept through a reload); without them (a link from elsewhere) back to the start page with the name
+const BOOT = `<script>(function(){var m=\/^\\/hra\\/([A-Za-z0-9_-]{2,15})\\/?$\/.exec(location.pathname);if(!m)return;var s=null;
+`
+  + `try{s=sessionStorage.getItem('launch:'+m[1].toLowerCase())}catch(e){}if(s){window.__q=new URLSearchParams(s);return}
+`
+  + `window.__redir=1;location.replace('/?jmeno='+encodeURIComponent(m[1]))})()</script>`;
+const page = name => `<!doctype html><meta charset=utf-8><title>${name === 'hostcheck' ? 'Warcraft III' : name}</title>${name === 'hostcheck' ? BOOT + `<script src="/test/loading.js?v=${LOADV}"></script>` : ''}<script type=module src="/test/${name}.js"></script>`;
 for (const name of ['play', 'hostcheck', 'shadercheck', 'aicheck'].filter(n => opts.entryPoints['test/' + n])) fs.writeFileSync(path.join(DEV, 'test', `${name}.html`), page(name));
 // the player's page takes its address's test parameters only from a server that serves this (--dev: shell.ts)
 fs.writeFileSync(path.join(DEV, 'test', 'dev.json'), '{"dev":true}\n');

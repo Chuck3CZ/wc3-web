@@ -8,7 +8,8 @@
 // file this big), keyed by its ETag, so the page shows the real download and a later start reads it from the browser;
 // the start page's loading step fills the same cache.
 (() => {
-  const q = new URLSearchParams(location.search);
+  if (window.__redir) return;
+  const q = window.__q || new URLSearchParams(location.search);   // __q: the short address /hra/<name> (build.mjs)
   if (!q.has('gpu')) return;
   // the log under the game (the <details> the page makes for it) is for whoever debugs: hidden unless ?showlog
   if (!q.has('showlog')) { const hide = document.createElement('style'); hide.textContent = 'details{display:none!important}'; document.documentElement.append(hide); }

@@ -300,8 +300,10 @@ const server = http.createServer((req, res) => {
     if (fs.existsSync(land)) return sendFile(req, res, land);
     res.writeHead(302, { ...ISOLATION, Location: '/test/hostcheck.html' }).end(); return;
   }
+  // the game's short address (the start page's Play): the game page, which takes its parameters from the tab
+  const rel = /^\/hra\/[A-Za-z0-9_-]{2,15}\/?$/.test(p) ? 'test/hostcheck.html' : p.slice(1);
   for (const root of STATIC) {
-    const f = inside(root, p.slice(1));
+    const f = inside(root, rel);
     if (f && fs.existsSync(f) && fs.statSync(f).isFile()) return sendFile(req, res, f);
   }
   res.writeHead(404, ISOLATION).end('not found');

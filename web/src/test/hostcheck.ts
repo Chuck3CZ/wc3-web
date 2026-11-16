@@ -5,7 +5,9 @@ import { attachNet } from '../net/index';
 import { attachRenderer } from '../gpu/index';
 import { attachInput } from '../input/index';
 import { attachAudio } from '../audio/index';
-const q = new URLSearchParams(location.search);
+// the short address /hra/<name>: its parameters set by the page's first script (build.mjs BOOT); without them it is on its way back
+if ((window as any).__redir) await new Promise(() => {});
+const q: URLSearchParams = (window as any).__q ?? new URLSearchParams(location.search);
 const gpu = q.has('gpu');
 // the game's window size (WC3_WIDTH/HEIGHT, runtime/web/null_platform.c), its picture's resolution: ?res=WxH,
 // by default the screen's (CSS pixels, so a fullscreen picture is not scaled; device pixels cost the GPU too much)
@@ -58,7 +60,7 @@ if (gpu) {
 // ?logpost: the log also goes to the server (POST /log, web/tools/wc3-dev-server.mjs keeps it in
 // out/browser.log), so a run can be read without copying it from the page
 const posting = q.has('logpost');
-let outq: string[] = ['@@start ' + new Date().toISOString() + ' ' + location.search];
+let outq: string[] = ['@@start ' + new Date().toISOString() + ' ' + location.pathname + '?' + q.toString()];
 const flush = () => { if (!posting || !outq.length) return; const body = outq.join('\n') + '\n'; outq = [];
   fetch('/log', { method: 'POST', body, keepalive: true }).catch(() => {}); };
 if (posting) setInterval(flush, 500);
