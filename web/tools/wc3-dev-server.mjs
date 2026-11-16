@@ -214,6 +214,8 @@ lan.on('connection', ws => {
   });
 });
 
+const PRESENCE_TTL = 150_000;         // the pages report every 20 s (a hidden tab maybe once a minute); a closed one says so
+const presence = new Map();           // lower-case name -> { name, since, seen }
 const server = http.createServer((req, res) => {
   // a request line that is not a path ("//", a bad %-escape) must not take the server down
   let url, p;
@@ -237,6 +239,32 @@ const server = http.createServer((req, res) => {
       try { if (body.startsWith('@@start')) fs.writeFileSync(f, body); else fs.appendFileSync(f, body); } catch (e) { console.log('[dev-server] log: ' + e.message); }
       res.writeHead(204, ISOLATION).end();
     });
+    return;
+  }
+  // who is playing: a game page says so every 20 s (POST /presence {"name"}, {"name","gone":1} as it closes);
+  // GET /presence lists the names seen within PRESENCE_TTL, "lan" when that name also has a place on the LAN switch
+  if (p === '/presence') {
+    if (req.method === 'POST') {
+      let body = ''; req.setEncoding('utf8');
+      req.on('data', d => { body += d; if (body.length > 1024) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const m = JSON.parse(body), name = String(m.name ?? '');
+          if (/^[A-Za-z0-9_-]{2,15}$/.test(name)) {
+            const k = name.toLowerCase(), was = presence.get(k);
+            if (m.gone) presence.delete(k);
+            else if (was || presence.size < 500) presence.set(k, { name, since: was?.since ?? Date.now(), seen: Date.now() });
+          }
+        } catch { /* not ours */ }
+        res.writeHead(204, ISOLATION).end();
+      });
+      return;
+    }
+    const now = Date.now(), onLan = new Set([...peers.values()].map(q => q.name.toLowerCase()));
+    for (const [k, v] of presence) if (now - v.seen > PRESENCE_TTL) presence.delete(k);
+    const players = [...presence.values()].sort((a, b) => a.since - b.since)
+      .map(v => ({ name: v.name, since: v.since, lan: onLan.has(v.name.toLowerCase()) }));
+    res.writeHead(200, { ...ISOLATION, 'Content-Type': 'application/json' }).end(JSON.stringify({ players }));
     return;
   }
   // player progress, one zip per player (the start page's "Game progress"): /saves/<key>, key = the save folder's name.

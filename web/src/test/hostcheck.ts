@@ -13,13 +13,40 @@ const resQ = /^(\d{3,4})x(\d{3,4})$/.exec(q.get('res') ?? '');
 const resW = (resQ ? +resQ[1] : Math.max(1280, screen.width)) & ~1, resH = (resQ ? +resQ[2] : Math.max(720, screen.height)) & ~1;
 const canvas = document.createElement('canvas');
 const fs = document.createElement('button');
-if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'display:block;width:1280px;max-width:100%;background:#000';
-           document.body.append(canvas);
+// ?net=<name>: the player; the page tells the server it is here (POST /presence) and lists who else is, beside the game
+const me = q.get('net') ?? '';
+const who = document.createElement('aside');
+if (gpu) { canvas.width = resW; canvas.height = resH; canvas.style.cssText = 'display:block;flex:0 1 1280px;min-width:0;max-width:100%;background:#000';
+           const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap';
+           who.style.cssText = 'flex:0 0 170px;font:13px system-ui,sans-serif;color:#ccc;background:#15171c;border:1px solid #2a2e36;border-radius:6px;padding:8px 10px';
+           row.append(canvas); if (me) row.append(who); document.body.append(row);
            fs.textContent = 'Celá obrazovka'; fs.style.cssText = 'margin:6px 0;font-size:14px';
            fs.onclick = () => { canvas.requestFullscreen({ navigationUI: 'hide' }).then(() => canvas.focus(), e => console.log('fullscreen: ' + e)); };
            const hint = document.createElement('span'); hint.style.cssText = 'margin-left:10px;font:13px system-ui,sans-serif;color:#666';
            hint.textContent = `${resW}×${resH} (?res=ŠxV). Celou obrazovku opustíš podržením Esc.`;
            document.body.append(fs, hint); }
+if (me) {
+  const here = (gone = false) => { const body = JSON.stringify(gone ? { name: me, gone: 1 } : { name: me });
+    if (gone) navigator.sendBeacon('/presence', body); else fetch('/presence', { method: 'POST', body, keepalive: true }).catch(() => {}); };
+  const draw = (ps: { name: string; lan: boolean }[]) => {
+    who.textContent = '';
+    const h = document.createElement('div'); h.style.cssText = 'font-weight:600;color:#f0c674;margin-bottom:6px';
+    h.textContent = `Hráči online (${ps.length})`; who.append(h);
+    for (const pl of ps) {
+      const d = document.createElement('div'); d.style.cssText = 'margin:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      const dot = document.createElement('span'); dot.style.cssText = `display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;background:${pl.lan ? '#4caf50' : '#777'}`;
+      dot.title = pl.lan ? 'připojen k LAN síti' : 've hře';
+      d.append(dot, pl.name + (pl.name.toLowerCase() === me.toLowerCase() ? ' (ty)' : ''));
+      if (pl.name.toLowerCase() === me.toLowerCase()) d.style.color = '#fff';
+      who.append(d);
+    }
+    const n = document.createElement('div'); n.style.cssText = 'margin-top:6px;font-size:11px;color:#777'; n.textContent = 'zelená = připojen k LAN'; who.append(n);
+  };
+  const poll = async () => { try { const r = await fetch('/presence', { cache: 'no-store' }); if (r.ok) draw((await r.json()).players); } catch { /* the server's list is optional */ } };
+  here(); setTimeout(poll, 500);
+  setInterval(here, 20_000); setInterval(poll, 10_000);
+  addEventListener('pagehide', () => here(true));
+}
 const pre = document.createElement('pre');
 if (gpu) {
   // the log folded away under the game, opened by a click

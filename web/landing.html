@@ -324,7 +324,7 @@ const UI = {
     c_br: 'Prohlížeč', c_br_warn: 'Hra je testovaná v Chrome a Edge. Jiný prohlížeč nemusí fungovat.',
     c_ptr: 'Myš a klávesnice', c_ptr_warn: 'Vypadá to na dotykové zařízení bez myši. Hra se ovládá myší a klávesnicí.',
     checking: 'kontroluji…',
-    s_mod: 'Modul hry', s_data: 'Herní data na serveru', s_up: 'aktualizováno', s_ok: 'k dispozici', s_no: 'nedostupná', s_modmatch: 'odpovídá stránce', s_stored: 'Modul v tomto prohlížeči', st_checking: 'ověřuji…', st_none: 'není uložený, stáhne se při spuštění', st_have: 'uložený', st_ok: 'uložený, ověřený (souhlasí se serverem)', st_bad: 'uložený, ale POŠKOZENÝ – při spuštění se stáhne znovu', st_old: 'uložená starší verze – při spuštění se stáhne nová', st_unknown: 'nelze zjistit', s_modbad: 'jiná verze než stránka, hra by se nevykreslovala (dej vědět správci)', s_srv: 'Server neodpovídá. Je stránka otevřená z hostitelského serveru?',
+    s_mod: 'Modul hry', s_data: 'Herní data na serveru', s_up: 'aktualizováno', s_ok: 'k dispozici', s_no: 'nedostupná', s_online: 'Hráči online', s_lan: 'připojen k LAN', s_since: 'od', s_nobody: 'Teď nikdo nehraje.', s_modmatch: 'odpovídá stránce', s_stored: 'Modul v tomto prohlížeči', st_checking: 'ověřuji…', st_none: 'není uložený, stáhne se při spuštění', st_have: 'uložený', st_ok: 'uložený, ověřený (souhlasí se serverem)', st_bad: 'uložený, ale POŠKOZENÝ – při spuštění se stáhne znovu', st_old: 'uložená starší verze – při spuštění se stáhne nová', st_unknown: 'nelze zjistit', s_modbad: 'jiná verze než stránka, hra by se nevykreslovala (dej vědět správci)', s_srv: 'Server neodpovídá. Je stránka otevřená z hostitelského serveru?',
     l_chk: 'Kontrola prohlížeče', l_mod: 'Stažení modulu hry', l_data: 'Připojení k herním datům', l_go: 'Spuštění hry',
     l_sub0: 'Chvilku strpení…', l_sub_mod: 'Stahuji modul hry. Příště se načte z paměti prohlížeče.', l_sub_go: 'Otevírám hru. Další načítání uvidíš na její stránce.',
     l_err_mod: 'Modul se nepodařilo stáhnout.', l_err_modbad: 'Stažený modul je poškozený (nesouhlasí kontrolní součet). Zkus to znovu, případně v Pokročilém smaž uložený modul.', l_err_modsrv: 'Server posílá jinou verzi modulu hry, než ke které patří tahle stránka. Hra by se nevykreslovala správně – dej vědět správci serveru.', mod_redo: 'uložený modul byl poškozený nebo starý – stahuji znovu', mod_ok: 'ověřeno', l_err_data: 'Herní data na serveru nejsou dostupná.',
@@ -348,7 +348,7 @@ const UI = {
     c_br: 'Browser', c_br_warn: 'The game is tested in Chrome and Edge. Another browser may not work.',
     c_ptr: 'Mouse and keyboard', c_ptr_warn: 'This looks like a touch device without a mouse. The game is played with mouse and keyboard.',
     checking: 'checking…',
-    s_mod: 'Game module', s_data: 'Game data on the server', s_up: 'updated', s_ok: 'available', s_no: 'unavailable', s_modmatch: 'matches this page', s_stored: 'Module in this browser', st_checking: 'checking…', st_none: 'not stored, downloaded at start', st_have: 'stored', st_ok: 'stored, verified (matches the server)', st_bad: 'stored but DAMAGED: downloaded again at start', st_old: 'an older version stored: the new one is downloaded at start', st_unknown: 'cannot tell', s_modbad: 'a different version than this page, the game would not draw (tell the operator)', s_srv: 'The server does not answer. Is this page opened from the host server?',
+    s_mod: 'Game module', s_data: 'Game data on the server', s_up: 'updated', s_ok: 'available', s_no: 'unavailable', s_online: 'Players online', s_lan: 'on the LAN', s_since: 'since', s_nobody: 'Nobody is playing right now.', s_modmatch: 'matches this page', s_stored: 'Module in this browser', st_checking: 'checking…', st_none: 'not stored, downloaded at start', st_have: 'stored', st_ok: 'stored, verified (matches the server)', st_bad: 'stored but DAMAGED: downloaded again at start', st_old: 'an older version stored: the new one is downloaded at start', st_unknown: 'cannot tell', s_modbad: 'a different version than this page, the game would not draw (tell the operator)', s_srv: 'The server does not answer. Is this page opened from the host server?',
     l_chk: 'Browser check', l_mod: 'Downloading the game module', l_data: 'Connecting to the game data', l_go: 'Starting the game',
     l_sub0: 'One moment…', l_sub_mod: 'Downloading the module. Next time it loads from the browser cache.', l_sub_go: 'Opening the game. You will see the rest of the loading on its page.',
     l_err_mod: 'The module could not be downloaded.', l_err_modbad: 'The downloaded module is damaged (checksum mismatch). Try again, or clear the stored module under Advanced.', l_err_modsrv: 'The server sends a different game module than this page belongs to. The game would not draw properly: tell the server operator.', mod_redo: 'the stored module was damaged or old: downloading again', mod_ok: 'verified', l_err_data: 'The game data on the server is not available.',
@@ -415,7 +415,7 @@ function drawChecks() {
 }
 
 // ---- server: verze modulu a data ----
-let srv = null, modEtag = '';
+let srv = null, modEtag = '', online = null, onlineOpen = false, onlineT = 0;
 // The module's address carries its version (ETag) and a counter the "clear" button raises: a new build, or a cleared module,
 // is a new address the browser has never cached, so a stale or damaged cache entry can never be reused
 const bust = () => store.get(GAME.id + '-bust') || '0';
@@ -435,6 +435,13 @@ async function probe() {
   } catch {}
   drawSrv();
   checkStored();
+  pollOnline();
+}
+// players on the server now (their game pages report themselves; an older server without /presence: no row)
+async function pollOnline() {
+  clearTimeout(onlineT);
+  try { const r = await fetch('/presence', { cache: 'no-store' }); if (r.ok) { online = (await r.json()).players || []; drawSrv(); } } catch {}
+  onlineT = setTimeout(pollOnline, 15000);
 }
 // the copy in this browser (Cache Storage 'wasm-v1'): none, this version and whole, damaged, or an older version
 async function checkStored() {
@@ -465,6 +472,16 @@ function drawSrv() {
   row(t('s_mod'), (srv.size ? nf().format(srv.size / 1048576) + ' ' + t('mb') : t('s_ok')) + ver + when + (srv.match === false ? ' – ' + t('s_modbad') : srv.match ? ', ' + t('s_modmatch') : ''), srv.match === false ? 'off' : 'on');
   if (srv.stored) row(t('s_stored'), t('st_' + srv.stored), srv.stored === 'ok' || srv.stored === 'have' ? 'on' : srv.stored === 'bad' ? 'off' : 'wait');
   row(t('s_data'), srv.data ? t('s_ok') : t('s_no'), srv.data ? 'on' : 'off');
+  if (online) {
+    // who is playing now (GET /presence): the count, the names under a click
+    const d = el('details'), s = el('summary'); s.style.cursor = 'pointer';
+    s.append(el('span', null, 'dot ' + (online.length ? 'on' : 'wait')), t('s_online') + ': ', el('b', String(online.length)));
+    d.append(s);
+    if (online.length) for (const pl of online) d.append(el('div', '· ' + pl.name + (pl.lan ? ' (' + t('s_lan') + ')' : '') + ' – ' + t('s_since') + ' ' + new Date(pl.since).toLocaleTimeString(lang === 'cs' ? 'cs-CZ' : 'en-GB', { timeStyle: 'short' })));
+    else d.append(el('div', t('s_nobody')));
+    d.open = onlineOpen; d.addEventListener('toggle', () => { onlineOpen = d.open; });
+    box.append(d);
+  }
   $('#ver').textContent = srv.mod ? srv.mod.toLocaleDateString(lang === 'cs' ? 'cs-CZ' : 'en-GB') : '';
 }
 
