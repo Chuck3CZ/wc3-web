@@ -35,7 +35,7 @@
         slow: 'Compiling a big module in the browser can take tens of seconds. The page has not frozen, the time keeps running.', cached: 'from the browser', mb: 'MB',
         steps: ['Download the game module', 'Compile the module', 'Start the game threads', 'Set up graphics (WebGPU)', 'The game creates its graphics device', 'Waiting for the first picture'] };
   // log lines that finish steps 1..4 (step 0, the download, is finished by the fetch below; step 5 by the picture)
-  const RE = [null, /^compiled in/, /^\[thread\] start tid=|^\[pool\] \d+ game workers started/, /^\[gpu\] renderer attached/, /CreateDevice/];
+  const RE = [null, /^compiled in/, /^\[thread\] start tid=|^\[pool\] \d+ game workers started/, /^\[gpu\] renderer attached/, /CreateDevice|^\[ddraw\] SetDisplayMode/];   // D3D, or DirectDraw (Bulanci)
   // The game is "on" when it has drawn and shown a picture.  Counters only, nothing is read back: the first draw call
   // (the hooks then remove themselves) and the frames the renderer takes from the canvas after it (getCurrentTexture).
   const gpuN = { drawn: false, framesAtDraw: 0, frames: 0 };
